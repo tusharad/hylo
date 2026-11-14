@@ -15,6 +15,10 @@ module Hylo.Core.Query.AST
   , formatScope
   , RelationBinding (..)
   , LateralBinding (..)
+  , Materialization (..)
+  , CycleClause (..)
+  , CTEType (..)
+  , CTEBinding (..)
   , FromItem (..)
   , Projectable (..)
   , renderExpr
@@ -60,6 +64,47 @@ data LateralBinding = LateralBinding
 instance NFData LateralBinding where
   rnf (LateralBinding a s) = rnf a `seq` rnf s
 
+-- | PostgreSQL 12+ CTE materialization fence.
+data Materialization
+  = DefaultMaterialization
+  | Materialized
+  | NotMaterialized
+  deriving (Eq, Show)
+
+instance NFData Materialization where
+  rnf m = m `seq` ()
+
+-- | Cycle detection clause for recursive CTEs (PostgreSQL 14+).
+data CycleClause = CycleClause
+  { cycleColumn :: !Text
+  , cycleSetColumn :: !Text
+  , cycleUsingColumn :: !Text
+  }
+  deriving (Eq, Show)
+
+instance NFData CycleClause where
+  rnf (CycleClause c s u) = rnf c `seq` rnf s `seq` rnf u
+
+-- | Type of Common Table Expression.
+data CTEType
+  = NonRecursiveCTE !Materialization !Text !Text
+  | RecursiveCTE !Text !Text !Text !(Maybe CycleClause)
+  deriving (Eq, Show)
+
+instance NFData CTEType where
+  rnf (NonRecursiveCTE m n q) = rnf m `seq` rnf n `seq` rnf q
+  rnf (RecursiveCTE n b r mc) = rnf n `seq` rnf b `seq` rnf r `seq` rnf mc
+
+-- | Named CTE binding attached to query AST.
+data CTEBinding = CTEBinding
+  { cteName :: !Text
+  , cteDefinition :: !CTEType
+  }
+  deriving (Eq, Show)
+
+instance NFData CTEBinding where
+  rnf (CTEBinding n d) = rnf n `seq` rnf d
+
 -- | ANSI SQL-92 relational FROM tree constructed by the join flattener.
 data FromItem
   = FromTable !Text !Text
@@ -85,7 +130,10 @@ renderExpr = \case
     "false" -> "FALSE"
     _ -> t
   ColExpr rel col -> "\"" <> rel <> "\".\"" <> col <> "\""
-  BinOpExpr op l r -> "(" <> renderExpr l <> " " <> op <> " " <> renderExpr r <> ")"
+  BinOpExpr op l r ->
+    if op == "=" && renderExpr r == "NULL"
+      then "(" <> renderExpr l <> " IS NULL)"
+      else "(" <> renderExpr l <> " " <> op <> " " <> renderExpr r <> ")"
   UnaryOpExpr op e ->
     if op == "IS NULL" || op == "IS NOT NULL"
       then "(" <> renderExpr e <> " " <> op <> ")"

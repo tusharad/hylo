@@ -7,6 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 {- |
 Module      : Hylo.Core.Expr
@@ -22,8 +23,10 @@ module Hylo.Core.Expr
   , colExpr
   , just
   , isNull
+  , isNull_
+  , IsNullToken (..)
   , coalesce
-  , (==.)
+  , EqOp (..)
   , (/=.)
   , (<.)
   , (<=.)
@@ -139,20 +142,46 @@ colExpr = ColExpr
 just :: QExpr a -> QExpr (Maybe a)
 just = LiftNullableExpr
 
--- | Test if a nullable expression is NULL.
-isNull :: QExpr (Maybe a) -> QExpr Bool
-isNull = UnaryOpExpr "IS NULL"
+-- | Sentinel token representing a SQL NULL value in comparison expressions.
+data IsNullToken = IsNullToken
+  deriving (Eq, Show)
+
+-- | SQL NULL token for equality comparisons (e.g. @where_ (e.managerId ==. isNull)@).
+isNull :: IsNullToken
+isNull = IsNullToken
+
+-- | Explicitly test if a nullable expression is NULL.
+isNull_ :: QExpr (Maybe a) -> QExpr Bool
+isNull_ = UnaryOpExpr "IS NULL"
 
 -- | Provide a fallback value for a nullable expression.
 coalesce :: QExpr (Maybe a) -> QExpr a -> QExpr a
 coalesce = CoalesceExpr
 
--- | Typed equality operator guarded by 'AssertComparable'.
-(==.) ::
-  forall e1 e2 a b. (ToQExpr e1 a, ToQExpr e2 b, AssertComparable a b) => e1 -> e2 -> QExpr Bool
-(==.) l r = comparableDict (Proxy :: Proxy a) (Proxy :: Proxy b) `seq` BinOpExpr "=" (toQExpr l) (toQExpr r)
+instance (Num a, Show a) => Num (QExpr a) where
+  (+) = BinOpExpr "+"
+  (-) = BinOpExpr "-"
+  (*) = BinOpExpr "*"
+  negate = UnaryOpExpr "-"
+  abs = UnaryOpExpr "ABS"
+  signum = UnaryOpExpr "SIGN"
+  fromInteger n = lit (fromInteger n :: a)
+
+-- | Class for equality comparisons, supporting standard typed comparisons and IS NULL tokens.
+class EqOp e1 e2 where
+  (==.) :: e1 -> e2 -> QExpr Bool
 
 infix 4 ==.
+
+instance
+  {-# OVERLAPPABLE #-}
+  (ToQExpr e1 a, ToQExpr e2 b, AssertComparable a b) =>
+  EqOp e1 e2
+  where
+  l ==. r = comparableDict (Proxy :: Proxy a) (Proxy :: Proxy b) `seq` BinOpExpr "=" (toQExpr l) (toQExpr r)
+
+instance EqOp (QExpr (Maybe a)) IsNullToken where
+  e ==. _ = UnaryOpExpr "IS NULL" e
 
 -- | Typed inequality operator guarded by 'AssertComparable'.
 (/=.) ::

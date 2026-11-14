@@ -28,6 +28,7 @@ import Hylo.Core.Query.Monad
   , QueryState (..)
   , initialQueryState
   )
+import Hylo.PG.Compiler.CTE (renderCTEs)
 import Hylo.PG.Compiler.JoinFlattener
   ( flattenJoins
   , renderFromItem
@@ -41,6 +42,7 @@ renderSQL q = fromString (T.unpack (renderSQLText q))
 renderSQLText :: Projectable a => Query Postgres a -> Text
 renderSQLText q =
   let (res, st) = runQuery q initialQueryState
+      cteClause = renderCTEs (qsCTEs st)
       projections = projectColumns res
       selectClause =
         "SELECT "
@@ -77,4 +79,13 @@ renderSQLText q =
         (h : hs) ->
           let combined = foldl (BinOpExpr "AND") h hs
            in " HAVING " <> renderExpr combined
-   in selectClause <> fromClause <> whereClause <> groupByClause <> havingClause
+      orderByClause = case qsOrderBy st of
+        [] -> ""
+        orders -> " ORDER BY " <> T.intercalate ", " orders
+   in cteClause
+        <> selectClause
+        <> fromClause
+        <> whereClause
+        <> groupByClause
+        <> havingClause
+        <> orderByClause
