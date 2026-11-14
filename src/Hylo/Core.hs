@@ -40,10 +40,33 @@ module Hylo.Core
   , primaryKey
   , foreignKey
   , describeCol
+  , TableCatalogDef (..)
+  , ColumnCatalogDef (..)
+  , toColumnCatalogDef
+  , tableCatalog
+
+    -- * Zero-Generics Codec Engine
+  , Codec (..)
+  , ValueCodec
+  , RowCodec
+  , Decoder (..)
+  , runBinaryEncoder
+  , runBinaryDecoder
+  , field
+  , fieldWith
+  , nullable
+  , idCodec
+  , dimap
+  , lmap
+  , rmap
+  , pairCodec
+  , tripleCodec
+  , quadCodec
   ) where
 
+import Hylo.Core.Codec
 import Hylo.Core.Context
 import Hylo.Core.Expr
 import Hylo.Core.Key
 import Hylo.Core.Nullable
-import Hylo.Core.Table
+import Hylo.Core.Schema

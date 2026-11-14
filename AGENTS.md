@@ -111,3 +111,20 @@ All agents and contributors working on this codebase MUST follow this branching 
    `run-fourmolu` in GitHub Actions and local `make format-check` must cover all tracked Haskell files, including root `Setup.hs` and example files.
    * **Rule:** Always format `Setup.hs` alongside `src/`, `app/`, and `test/` using `make format`. Do not leave root or script Haskell files unformatted.
 
+5. **NoFieldSelectors & Field Name Collisions with Prelude (`GHC-87543`):**
+   When defining records with common domain field names like `id`, `head`, `tail`, or `type`, GHC generates top-level record selector functions by default that collide with `Prelude` identifiers (e.g., `Prelude.id`).
+   * **Rule:** Always enable `{-# LANGUAGE NoFieldSelectors #-}` and `{-# LANGUAGE DuplicateRecordFields #-}` on modules defining HKD table records. Use `OverloadedRecordDot` (`user.id`) rather than bare selector functions (`id user`).
+
+6. **Standalone Deriving on Higher-Kinded Records (`GHC-48406`):**
+   Using standalone deriving to instantiate higher-kinded records over type-level constants (e.g., `deriving instance Eq (UserT 'Result)`) triggers `GHC-48406: All instance types must be of the form (T a1 ... an) where a1 ... an are distinct type variables`.
+   * **Rule:** Always add `{-# LANGUAGE FlexibleInstances #-}` to the module whenever using standalone deriving over instantiated type family or promoted data kind arguments.
+
+7. **HSpec and Multiple QuickCheck Properties in a Single `it` Block (`GHC-83865`):**
+   In HSpec, `Property` is not a monad (`m a`). Attempting to sequence multiple `property $ \x -> ...` calls inside a single `it "..." $ do` block causes GHC type mismatch errors (`Couldn't match expected type ‘m0 a0’ with actual type ‘Property’`).
+   * **Rule:** Always place each QuickCheck `property` within its own distinct `it` block.
+
+8. **Applicative Identity Law & HLint `Use <$>` Suggestion:**
+   Verifying the Applicative identity law `pure id <*> v == v` causes HLint to suggest replacing `pure id <*>` with `(id <$>)`.
+   * **Rule:** Add `{-# HLINT ignore "Use <$>" #-}` to algebraic test modules to preserve explicit verification of the Applicative `<*>` identity law without tripping CI lint gates.
+
+
