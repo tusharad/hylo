@@ -14,6 +14,7 @@ module Hylo.Core.Query.AST
   ( ScopeId (..)
   , formatScope
   , RelationBinding (..)
+  , LateralBinding (..)
   , FromItem (..)
   , Projectable (..)
   , renderExpr
@@ -49,11 +50,22 @@ data RelationBinding = RelationBinding
 instance NFData RelationBinding where
   rnf (RelationBinding t s a) = rnf t `seq` rnf s `seq` rnf a
 
+-- | Internal binding descriptor tracking a correlated lateral subquery.
+data LateralBinding = LateralBinding
+  { lbAlias :: !Text
+  , lbSubquerySql :: !Text
+  }
+  deriving (Eq, Show)
+
+instance NFData LateralBinding where
+  rnf (LateralBinding a s) = rnf a `seq` rnf s
+
 -- | ANSI SQL-92 relational FROM tree constructed by the join flattener.
 data FromItem
   = FromTable !Text !Text
   | InnerJoin !FromItem !FromItem !(QExpr Bool)
   | LeftJoin !FromItem !FromItem !(QExpr Bool)
+  | LeftJoinLateral !FromItem !Text !Text
   | CrossJoin !FromItem !FromItem
   deriving (Eq, Show)
 
@@ -62,6 +74,7 @@ instance NFData FromItem where
     FromTable t a -> rnf t `seq` rnf a
     InnerJoin l r c -> rnf l `seq` rnf r `seq` rnf c
     LeftJoin l r c -> rnf l `seq` rnf r `seq` rnf c
+    LeftJoinLateral l s a -> rnf l `seq` rnf s `seq` rnf a
     CrossJoin l r -> rnf l `seq` rnf r
 
 -- | Render a typed QExpr into SQL text syntax.

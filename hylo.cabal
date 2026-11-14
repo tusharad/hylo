@@ -43,7 +43,9 @@ library
       Hylo.PG
       Hylo.PG.Codec.Binary
       Hylo.PG.Compiler.JoinFlattener
+      Hylo.PG.Compiler.Lateral
       Hylo.PG.Compiler.SQL
+      Hylo.PG.Hydration.Graph
       Lib
   other-modules:
       Paths_hylo
@@ -80,9 +82,11 @@ test-suite hylo-test
       Hylo.Core.TableSpec
       Hylo.Core.TypeErrorSpec
       Hylo.PG.Compiler.JoinFlattenerSpec
+      Hylo.PG.Compiler.LateralSpec
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TypeErrorSpec
       Test.Hylo.PG.Compiler.JoinFlattenerSpec
+      Test.Hylo.PG.Compiler.LateralSpec
       Test.ShouldNotTypecheck
       Paths_hylo
   hs-source-dirs:

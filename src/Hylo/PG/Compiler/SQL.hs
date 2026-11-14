@@ -16,7 +16,13 @@ import Data.String (IsString (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..))
-import Hylo.Core.Query.AST (Projectable (..), renderExpr)
+import Hylo.Core.Query (Postgres)
+import Hylo.Core.Query.AST
+  ( FromItem (..)
+  , LateralBinding (..)
+  , Projectable (..)
+  , renderExpr
+  )
 import Hylo.Core.Query.Monad
   ( Query (..)
   , QueryState (..)
@@ -28,11 +34,11 @@ import Hylo.PG.Compiler.JoinFlattener
   )
 
 -- | Render a Query into polymorphic string/text SQL representation.
-renderSQL :: (Projectable a, IsString s) => Query db a -> s
+renderSQL :: (Projectable a, IsString s) => Query Postgres a -> s
 renderSQL q = fromString (T.unpack (renderSQLText q))
 
 -- | Render a Query into strict Text SQL representation.
-renderSQLText :: Projectable a => Query db a -> Text
+renderSQLText :: Projectable a => Query Postgres a -> Text
 renderSQLText q =
   let (res, st) = runQuery q initialQueryState
       projections = projectColumns res
@@ -40,7 +46,22 @@ renderSQLText q =
         "SELECT "
           <> (if null projections then "1" else T.intercalate ", " projections)
       (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
-      fromClause = case mFrom of
+      mFromWithLaterals = case mFrom of
+        Nothing -> case qsLaterals st of
+          [] -> Nothing
+          (l : ls) ->
+            Just $
+              foldl
+                (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+                (FromTable (lbAlias l) (lbAlias l))
+                ls
+        Just baseItem ->
+          Just $
+            foldl
+              (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+              baseItem
+              (qsLaterals st)
+      fromClause = case mFromWithLaterals of
         Nothing -> ""
         Just item -> " FROM " <> renderFromItem item
       whereClause = case wherePreds of

@@ -148,5 +148,18 @@ All agents and contributors working on this codebase MUST follow this branching 
 15. **Duplicate Exports with Type Constructor Records (`GHC-47854`):**
    Exporting a data/newtype constructor with wildcards (e.g. `Query (..)`) alongside its individual record fields or methods (e.g. `runQuery`) triggers `[GHC-47854] [-Wduplicate-exports]`. If `Type (..)` is exported, omit standalone mentions of its field accessors.
 
+16. **Ambiguous Backend Type Variable in Dialect Compilers (`GHC-39999`):**
+   When defining backend-specific SQL compilers (e.g. `Hylo.PG.Compiler.SQL`), leaving `renderSQL` polymorphic over `Query db a` causes GHC to complain that `db` is ambiguous whenever backend capability constraints (e.g. `SupportsLateralSubqueries db`) are applied in query blocks without explicit type annotations.
+   * **Rule:** Specialized dialect compilers must fix their backend type parameter concretely (e.g. `renderSQL :: (Projectable a, IsString s) => Query Postgres a -> s`).
+
+17. **Monotonic Scope and Lateral Index Propagation Across Nested Subqueries:**
+   When executing nested subqueries in `many`, allocating lateral aliases using the outer state's initial index (`latAlias = "lat_" <> show (qsNextLateral s)`) causes nested subqueries to collide with the outer query's alias (e.g. both using `"lat_0"`).
+   * **Rule:** The outer lateral alias must be allocated using the lateral counter *after* the child subquery has completed (`latAlias = "lat_" <> show (qsNextLateral childSt)`), ensuring monotonic, collision-free lateral aliases across arbitrarily deep nested graphs.
+
+18. **Redundant Constraint Warnings for Marker Classes:**
+   Capability marker classes with no methods (e.g. `class SupportsLateralSubqueries db`) trigger `[-Wredundant-constraints]` when used in function signatures.
+   * **Rule:** Include a `Proxy` dictionary method (`lateralSubqueriesDict :: Proxy db -> ()`) and evaluate it with `seq` in the guarded combinator (`many`), ensuring the capability constraint is genuinely enforced and eliminating compiler warnings.
+
+
 
 
