@@ -76,9 +76,9 @@ instance Arbitrary (Embedding "test-model" 4) where
 spec :: Spec
 spec = describe "Epic 15: Type-Level pgvector Support" $ do
   describe "15.4 Executable Oracle Specification" $ do
-    it "statically rejects vector distance between different models"
-      $ shouldNotTypecheckWith "[Hylo Error E007]"
-      $ let v1 = undefined :: QExpr (Embedding "text-embedding-3-small" 1536)
+    it "statically rejects vector distance between different models" $ do
+      shouldNotTypecheckWith "[Hylo Error E007]" $
+        let v1 = undefined :: QExpr (Embedding "text-embedding-3-small" 1536)
             v2 = undefined :: QExpr (Embedding "bge-large-en" 1024)
             forbidden = cosineDistance v1 v2
          in rnf forbidden
@@ -87,7 +87,6 @@ spec = describe "Epic 15: Type-Level pgvector Support" $ do
       let vec = Embedding (Vector.fromList [1.0, 2.0, 3.0]) :: Embedding "test" 3
           bytes = encodeBinaryVector vec
       BS.take 4 bytes `shouldBe` BS.pack [0x00, 0x03, 0x00, 0x00] -- dim = 3, unused = 0
-
   describe "Contract Elicitation: Formal Laws" $ do
     it "Law 1: Metric Identity Laws (Reflexivity: cosineDistance(v, v) == 0.0)" $ do
       property $ \(v :: Embedding "test-model" 3) -> do
