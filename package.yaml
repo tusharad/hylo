@@ -21,6 +21,7 @@ dependencies:
 - bytestring >= 0.10 && < 0.13
 - deepseq >= 1.4 && < 2
 - time >= 1.9 && < 2
+- stm >= 2.5 && < 3
 
 ghc-options:
 - -Wall

@@ -141,14 +141,14 @@ insert schema cs =
       let tName = tableName schema
           key = changesetKey cs
        in if key /= "" && elem (tName, key) (txStore st)
-            then Left (TxConstraintViolation tName "unique_constraint" key)
+            then (Left (TxConstraintViolation tName "unique_constraint" key), st)
             else
               let st' =
                     st
                       { txStore = if key /= "" then (tName, key) : txStore st else txStore st
                       , txOperations = txOperations st ++ [OpMutate ("INSERT INTO " <> tName)]
                       }
-               in Right (errorWithoutStackTrace "insert: simulated entity hydration", st')
+               in (Right (errorWithoutStackTrace "insert: simulated entity hydration"), st')
 
 -- | Statically guarded update operation. Fails with [Hylo Error E005] in ReadOnly mode.
 update ::
@@ -161,7 +161,7 @@ update schema _ =
   writableDict (Proxy :: Proxy mode) `seq`
     TxAction $ \st ->
       let st' = st {txOperations = txOperations st ++ [OpMutate ("UPDATE " <> tableName schema)]}
-       in Right (errorWithoutStackTrace "update: simulated entity hydration", st')
+       in (Right (errorWithoutStackTrace "update: simulated entity hydration"), st')
 
 -- | Statically guarded delete operation. Fails with [Hylo Error E005] in ReadOnly mode.
 delete ::
@@ -174,4 +174,4 @@ delete schema _ =
   writableDict (Proxy :: Proxy mode) `seq`
     TxAction $ \st ->
       let st' = st {txOperations = txOperations st ++ [OpMutate ("DELETE FROM " <> tableName schema)]}
-       in Right ((), st')
+       in (Right (), st')

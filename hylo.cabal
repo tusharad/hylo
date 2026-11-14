@@ -58,7 +58,10 @@ library
       Hylo.PG.Hydration.Graph
       Hylo.PG.Mutation.Locking
       Hylo.PG.Mutation.Upsert
+      Hylo.PG.Pool.Routing
       Hylo.PG.Streaming.Cursor
+      Hylo.PG.Transaction.Hooks
+      Hylo.PG.Transaction.Retry
       Hylo.PG.Transaction.Savepoint
       Lib
   other-modules:
@@ -70,6 +73,7 @@ library
       base >=4.7 && <5
     , bytestring >=0.10 && <0.13
     , deepseq >=1.4 && <2
+    , stm >=2.5 && <3
     , text >=1.2 && <3
     , time >=1.9 && <2
   default-language: Haskell2010
@@ -86,6 +90,7 @@ executable hylo-exe
     , bytestring >=0.10 && <0.13
     , deepseq >=1.4 && <2
     , hylo
+    , stm >=2.5 && <3
     , text >=1.2 && <3
     , time >=1.9 && <2
   default-language: Haskell2010
@@ -105,6 +110,7 @@ test-suite hylo-test
       Hylo.PG.Compiler.WindowSpec
       Hylo.PG.Mutation.UpsertSpec
       Hylo.PG.Streaming.CursorSpec
+      Hylo.PG.Transaction.RetrySpec
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TransactionSpec
       Test.Hylo.Core.TypeErrorSpec
@@ -115,6 +121,7 @@ test-suite hylo-test
       Test.Hylo.PG.Compiler.WindowSpec
       Test.Hylo.PG.Mutation.UpsertSpec
       Test.Hylo.PG.Streaming.CursorSpec
+      Test.Hylo.PG.Transaction.RetrySpec
       Test.ShouldNotTypecheck
       Paths_hylo
   hs-source-dirs:
@@ -128,6 +135,7 @@ test-suite hylo-test
     , hspec >=2.11
     , hylo
     , should-not-typecheck >=2.1
+    , stm >=2.5 && <3
     , text >=1.2 && <3
     , time >=1.9 && <2
   default-language: Haskell2010

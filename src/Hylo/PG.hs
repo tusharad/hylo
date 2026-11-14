@@ -19,6 +19,9 @@ module Hylo.PG
   , module Hylo.PG.Streaming.Cursor
   , module Hylo.PG.Connection
   , module Hylo.PG.Transaction.Savepoint
+  , module Hylo.PG.Transaction.Retry
+  , module Hylo.PG.Transaction.Hooks
+  , module Hylo.PG.Pool.Routing
   ) where
 
 import Hylo.PG.Codec.Binary
@@ -32,5 +35,8 @@ import Hylo.PG.Connection
 import Hylo.PG.Hydration.Graph
 import Hylo.PG.Mutation.Locking
 import Hylo.PG.Mutation.Upsert
+import Hylo.PG.Pool.Routing
 import Hylo.PG.Streaming.Cursor
+import Hylo.PG.Transaction.Hooks
+import Hylo.PG.Transaction.Retry
 import Hylo.PG.Transaction.Savepoint
