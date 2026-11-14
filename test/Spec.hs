@@ -16,6 +16,7 @@ import qualified Hylo.PG.Compiler.JoinFlattenerSpec as JoinFlattenerSpec
 import qualified Hylo.PG.Compiler.LateralSpec as LateralSpec
 import qualified Hylo.PG.Compiler.WindowSpec as WindowSpec
 import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
+import qualified Hylo.PG.Streaming.CursorSpec as CursorSpec
 import Test.Hspec
 
 main :: IO ()
@@ -29,3 +30,4 @@ main = hspec $ do
   WindowSpec.spec
   CTESpec.spec
   UpsertSpec.spec
+  CursorSpec.spec

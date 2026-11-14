@@ -209,6 +209,10 @@ renderExpr = \case
      in case mFilter of
           Nothing -> base
           Just cond -> base <> " FILTER (WHERE " <> renderExpr cond <> ")"
+  RowCmpExpr op cols _ nParams ->
+    let lhs = "(" <> T.intercalate ", " cols <> ")"
+        rhs = "(" <> T.intercalate ", " ["$" <> T.pack (show i) | i <- [1 .. nParams]] <> ")"
+     in "(" <> lhs <> " " <> op <> " " <> rhs <> ")"
 
 -- | Extract all table relation aliases referenced in a QExpr expression.
 exprAliases :: QExpr a -> [Text]
@@ -221,6 +225,7 @@ exprAliases = \case
   CoalesceExpr m dflt -> exprAliases m ++ exprAliases dflt
   AggOpExpr _ arg mFilter -> exprAliases arg ++ maybe [] exprAliases mFilter
   StringAggExpr arg delim mFilter -> exprAliases arg ++ exprAliases delim ++ maybe [] exprAliases mFilter
+  RowCmpExpr _ _ aliases _ -> aliases
 
 -- | Class of types that can be projected into SQL SELECT column lists.
 class Projectable a where

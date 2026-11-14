@@ -209,6 +209,15 @@ All agents and contributors working on this codebase MUST follow this branching 
 31. **Local Formatting Verification Prior to Git Push (`fourmolu`):**
    CI strictly enforces `fourmolu --mode check` across all Haskell source trees (`src`, `app`, `test`, `Setup.hs`). Always run `fourmolu --mode check $(git ls-files 'src/**/*.hs' 'test/**/*.hs' 'app/**/*.hs' 'Setup.hs')` locally before committing to prevent PR CI format check failures. If discrepancies arise (e.g. multiline comment style or binary operator placement), apply `fourmolu --mode inplace <files>` immediately.
 
+32. **Exhaustive Base Cases for Recursive Property Simulation Helpers:**
+   When defining recursive simulation helper functions in QuickCheck properties (such as simulating chunked pagination or stream traversal over arbitrary lists `paginate pool mCur`), failing to handle the empty pool case (`paginate [] _ = []`) when `mCur` is `Nothing` causes infinite recursion when QuickCheck tests empty inputs (`[]`), hanging the test runner indefinitely.
+   * **Rule:** Always define an unconditional base case for empty collections (`paginate [] _ = []` or checking `if null page then [] else ...`) at the head of recursive simulation helpers before matching on parameter states.
+
+33. **Prepositive vs. Postpositive Qualified Imports (`GHC-87491`):**
+   Postpositive qualified imports (`import Data.Text qualified as T`) are rejected by GHC with `[GHC-87491]` unless the `ImportQualifiedPost` language extension is enabled.
+   * **Rule:** Always use standard Haskell2010 prepositive qualified syntax (`import qualified Data.Text as T`) unless `{-# LANGUAGE ImportQualifiedPost #-}` is explicitly turned on at module header.
+
+
 
 
 

@@ -39,6 +39,7 @@ library
       Hylo.Core.Query.AST
       Hylo.Core.Query.CTE
       Hylo.Core.Query.Monad
+      Hylo.Core.Query.Pagination
       Hylo.Core.Query.Recursive
       Hylo.Core.Query.Window
       Hylo.Core.Schema
@@ -55,6 +56,7 @@ library
       Hylo.PG.Hydration.Graph
       Hylo.PG.Mutation.Locking
       Hylo.PG.Mutation.Upsert
+      Hylo.PG.Streaming.Cursor
       Lib
   other-modules:
       Paths_hylo
@@ -66,6 +68,7 @@ library
     , bytestring >=0.10 && <0.13
     , deepseq >=1.4 && <2
     , text >=1.2 && <3
+    , time >=1.9 && <2
   default-language: Haskell2010
 
 executable hylo-exe
@@ -81,6 +84,7 @@ executable hylo-exe
     , deepseq >=1.4 && <2
     , hylo
     , text >=1.2 && <3
+    , time >=1.9 && <2
   default-language: Haskell2010
 
 test-suite hylo-test
@@ -96,6 +100,7 @@ test-suite hylo-test
       Hylo.PG.Compiler.LateralSpec
       Hylo.PG.Compiler.WindowSpec
       Hylo.PG.Mutation.UpsertSpec
+      Hylo.PG.Streaming.CursorSpec
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TypeErrorSpec
       Test.Hylo.PG.Compiler.AggregateSpec
@@ -104,6 +109,7 @@ test-suite hylo-test
       Test.Hylo.PG.Compiler.LateralSpec
       Test.Hylo.PG.Compiler.WindowSpec
       Test.Hylo.PG.Mutation.UpsertSpec
+      Test.Hylo.PG.Streaming.CursorSpec
       Test.ShouldNotTypecheck
       Paths_hylo
   hs-source-dirs:
@@ -118,4 +124,5 @@ test-suite hylo-test
     , hylo
     , should-not-typecheck >=2.1
     , text >=1.2 && <3
+    , time >=1.9 && <2
   default-language: Haskell2010

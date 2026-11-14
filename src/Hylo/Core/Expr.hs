@@ -59,6 +59,7 @@ data QExpr (a :: Type) where
   CoalesceExpr :: !(QExpr (Maybe a)) -> !(QExpr a) -> QExpr a
   AggOpExpr :: !Text -> !(QExpr a) -> !(Maybe (QExpr Bool)) -> QExpr b
   StringAggExpr :: !(QExpr Text) -> !(QExpr Text) -> !(Maybe (QExpr Bool)) -> QExpr Text
+  RowCmpExpr :: !Text -> ![Text] -> ![Text] -> !Int -> QExpr Bool
 
 instance Show (QExpr a) where
   showsPrec d expr = case expr of
@@ -103,6 +104,16 @@ instance Show (QExpr a) where
           . shows delim
           . showString " "
           . shows mFilter
+    RowCmpExpr op cols aliases n ->
+      showParen (d > 10) $
+        showString "RowCmpExpr "
+          . shows op
+          . showString " "
+          . shows cols
+          . showString " "
+          . shows aliases
+          . showString " "
+          . shows n
 
 instance Eq (QExpr a) where
   LitExpr t1 == LitExpr t2 = t1 == t2
@@ -117,6 +128,8 @@ instance Eq (QExpr a) where
     f1 == f2 && show a1 == show a2 && show m1 == show m2
   StringAggExpr a1 d1 m1 == StringAggExpr a2 d2 m2 =
     show a1 == show a2 && show d1 == show d2 && show m1 == show m2
+  RowCmpExpr o1 c1 a1 n1 == RowCmpExpr o2 c2 a2 n2 =
+    o1 == o2 && c1 == c2 && a1 == a2 && n1 == n2
   _ == _ = False
 
 instance NFData (QExpr a) where
@@ -129,6 +142,8 @@ instance NFData (QExpr a) where
     CoalesceExpr m dflt -> rnf m `seq` rnf dflt
     AggOpExpr fn arg mFilter -> rnf fn `seq` rnf arg `seq` rnf mFilter
     StringAggExpr arg delim mFilter -> rnf arg `seq` rnf delim `seq` rnf mFilter
+    RowCmpExpr op cols aliases n ->
+      rnf op `seq` rnf cols `seq` rnf aliases `seq` rnf n
 
 -- | Construct a literal expression from any Show-able value.
 lit :: Show a => a -> QExpr a
