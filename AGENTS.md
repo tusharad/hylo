@@ -183,6 +183,18 @@ All agents and contributors working on this codebase MUST follow this branching 
 24. **Broad `Projectable` Tupling & Analytical Projections:**
    Analytical window queries often project wide result tuples (e.g., entity primary keys plus multiple ranked, lagged, and framed window expressions). Provide `Projectable` tuple instances up to 8-tuples (`(a, b, c, d, e, f, g, h)`) in `Hylo.Core.Query.AST` so that complex multi-window select projections compile seamlessly without requiring nested pairs or intermediate records.
 
+25. **Ambiguous Type Variables with Overloaded Comparison Tokens (`GHC-18872`, `GHC-43085`):**
+   When defining sentinel tokens for comparisons like `isNull` in `where_ (e.managerId ==. isNull)`, never type `isNull` as a polymorphic class method `forall a. IsNullPattern a => a` if the comparison class `EqOp e1 e2` relies on overlapping instances. When `e2` is polymorphic, GHC cannot resolve overlapping instances deterministically ("the choice depends on the instantiation of e2").
+   * **Rule:** Give `isNull` a concrete singleton token type (`data IsNullToken = IsNullToken; isNull = IsNullToken`) and declare a dedicated instance `instance EqOp (QExpr (Maybe a)) IsNullToken where e ==. _ = UnaryOpExpr "IS NULL" e`.
+
+26. **Discarded Polymorphic Action in Monadic Do-Notation (`GHC-81995` / `-Wunused-do-bind`):**
+   When overloading a combinator like `orderBy` across different targets (`WindowDef -> WindowDef` and `Query db ()`), declaring `instance OrderBy (Query db ())` causes GHC inside do-notation blocks to type `orderBy [...]` as `m a` (with an unconstrained result type variable `a`), which triggers `[-Wunused-do-bind]: A do-notation statement discarded a result of type ‘GHC.Types.ZonkAny’`.
+   * **Rule:** Constrain the instance with an equality constraint: `instance (a ~ ()) => OrderBy (Query db a)`. This forces GHC to immediately unify the discarded result with `()` in monadic do-blocks, eliminating `-Wunused-do-bind`.
+
+27. **Monotonic Scope Allocation Across Recursive CTE Steps:**
+   In recursive CTEs, scope IDs must be propagated monotonically from the base step into the recursive step and then into the outer query (`qsNextScope = qsNextScope prevStep`). Expecting the recursive step relation to start at alias index 0 (e.g. `"org_tree_0"`) fails because earlier relations in the base step and recursive step already consumed indices 0 and 1. Tests and SQL matchers must reflect the strictly monotonic scope allocation (`"org_tree_2"`, `"org_tree_3"`).
+
+
 
 
 

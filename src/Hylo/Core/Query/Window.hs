@@ -4,6 +4,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 
 {- |
 Module      : Hylo.Core.Query.Window
@@ -17,7 +18,7 @@ module Hylo.Core.Query.Window
     WindowDef (..)
   , window
   , partitionBy
-  , orderBy
+  , OrderBy (..)
   , PartitionKey (..)
 
     -- * Order Specifications
@@ -72,6 +73,7 @@ import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..), ToQExpr (..))
 import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Query.Aggregate (AggExpr (..))
+import Hylo.Core.Query.Monad (Query (..), QueryState (..))
 
 -- | Order specification with direction and null placement semantics.
 newtype OrderSpec = OrderSpec
@@ -185,9 +187,17 @@ instance (PartitionKey a, PartitionKey b, PartitionKey c) => PartitionKey (a, b,
 partitionBy :: PartitionKey k => k -> WindowDef -> WindowDef
 partitionBy k w = w {wdPartitions = wdPartitions w ++ renderPartitionKey k}
 
--- | Add ORDER BY specifications to a window definition.
-orderBy :: [OrderSpec] -> WindowDef -> WindowDef
-orderBy specs w = w {wdOrders = wdOrders w ++ map unOrderSpec specs}
+-- | Class overloading 'orderBy' across window specifications and monadic Query blocks.
+class OrderBy target where
+  orderBy :: [OrderSpec] -> target
+
+instance OrderBy (WindowDef -> WindowDef) where
+  orderBy specs w = w {wdOrders = wdOrders w ++ map unOrderSpec specs}
+
+instance (a ~ ()) => OrderBy (Query db a) where
+  orderBy specs = Query $ \s ->
+    let s' = s {qsOrderBy = qsOrderBy s ++ map unOrderSpec specs}
+     in ((), s')
 
 -- | Add a ROWS BETWEEN framing specification to a window definition.
 rowsBetween :: FrameBound -> FrameBound -> WindowDef -> WindowDef

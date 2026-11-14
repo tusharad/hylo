@@ -22,7 +22,7 @@ module Hylo.Core.Query
   , Query (..)
   , QueryState (..)
   , initialQueryState
-  , each
+  , FromRelation (..)
   , eachWith
   , where_
   , ScopeId (..)
@@ -39,6 +39,10 @@ module Hylo.Core.Query
 
     -- * Window Functions & Framing
   , module Hylo.Core.Query.Window
+
+    -- * Common Table Expressions & Recursive Graphs
+  , module Hylo.Core.Query.CTE
+  , module Hylo.Core.Query.Recursive
 
     -- * Transaction Monad & Modes
   , TxMode (..)
@@ -70,15 +74,17 @@ import Hylo.Core.Query.AST
   , renderExpr
   )
 import Hylo.Core.Query.Aggregate
+import Hylo.Core.Query.CTE
 import Hylo.Core.Query.Monad
-  ( Query (..)
+  ( FromRelation (..)
+  , Query (..)
   , QueryState (..)
-  , each
   , eachWith
   , initialQueryState
   , runQuery
   , where_
   )
+import Hylo.Core.Query.Recursive
 import Hylo.Core.Query.Window
 import Hylo.Core.Table (TableSchema)
 import Hylo.Core.TypeError (AssertWritable (..), TxMode (..))

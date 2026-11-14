@@ -1,4 +1,7 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
@@ -14,7 +17,7 @@ module Hylo.Core.Query.Monad
   ( QueryState (..)
   , initialQueryState
   , Query (..)
-  , each
+  , FromRelation (..)
   , eachWith
   , where_
   , having
@@ -25,7 +28,8 @@ import Data.Text (Text)
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr)
 import Hylo.Core.Query.AST
-  ( LateralBinding (..)
+  ( CTEBinding (..)
+  , LateralBinding (..)
   , RelationBinding (..)
   , ScopeId (..)
   , formatScope
@@ -41,16 +45,26 @@ data QueryState = QueryState
   , qsLaterals :: ![LateralBinding]
   , qsGroupBy :: ![Text]
   , qsHaving :: ![QExpr Bool]
+  , qsOrderBy :: ![Text]
+  , qsCTEs :: ![CTEBinding]
   }
   deriving (Eq, Show)
 
 instance NFData QueryState where
-  rnf (QueryState n l r p lat gb hv) =
-    rnf n `seq` rnf l `seq` rnf r `seq` rnf p `seq` rnf lat `seq` rnf gb `seq` rnf hv
+  rnf (QueryState n l r p lat gb hv ob ctes) =
+    rnf n
+      `seq` rnf l
+      `seq` rnf r
+      `seq` rnf p
+      `seq` rnf lat
+      `seq` rnf gb
+      `seq` rnf hv
+      `seq` rnf ob
+      `seq` rnf ctes
 
 -- | Default initial state for a new Query computation.
 initialQueryState :: QueryState
-initialQueryState = QueryState 0 0 [] [] [] [] []
+initialQueryState = QueryState 0 0 [] [] [] [] [] [] []
 
 -- | Pure operational Query monad parameterised by database backend marker.
 newtype Query db a = Query
@@ -78,9 +92,12 @@ instance Monad (Query db) where
         Query h2 = f a
      in h2 s1
 
--- | Bind a database table into the Query monad, assigning a collision-free ScopeId.
-each :: Table table => TableSchema table -> Query db (table 'Expr)
-each = eachWith toTableExpr
+-- | Class for relational sources (tables, CTEs) that can be bound into the Query monad.
+class FromRelation rel record | rel -> record where
+  each :: rel -> Query db record
+
+instance Table table => FromRelation (TableSchema table) (table 'Expr) where
+  each = eachWith toTableExpr
 
 -- | Bind a database table using an explicit expression synthesis function.
 eachWith :: (Text -> table 'Meta -> table 'Expr) -> TableSchema table -> Query db (table 'Expr)
