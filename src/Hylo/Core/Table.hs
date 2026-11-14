@@ -29,6 +29,8 @@ import Hylo.Core.Expr (QExpr, colExpr)
 -- | Class for HKD table schemas that can project their fields into 'Expr context.
 class Table (table :: Ctx -> Type) where
   toTableExpr :: Text -> table 'Meta -> table 'Expr
+  tableExprColumns :: table 'Expr -> [Text]
+  tableExprColumns _ = []
 
 -- | Construct a typed SQL column expression for an alias and a column specification.
 colSpecExpr :: Text -> ColSpec a -> QExpr a

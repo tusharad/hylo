@@ -77,6 +77,13 @@ renderFromItem = \case
       <> renderFromItem right
       <> " ON "
       <> renderExpr onCond
+  LeftJoinLateral left subquerySql latAlias ->
+    renderFromItem left
+      <> " LEFT JOIN LATERAL ("
+      <> subquerySql
+      <> ") AS \""
+      <> latAlias
+      <> "\" ON TRUE"
   CrossJoin left right ->
     renderFromItem left
       <> " CROSS JOIN "

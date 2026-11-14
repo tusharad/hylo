@@ -24,7 +24,8 @@ import Data.Text (Text)
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr)
 import Hylo.Core.Query.AST
-  ( RelationBinding (..)
+  ( LateralBinding (..)
+  , RelationBinding (..)
   , ScopeId (..)
   , formatScope
   )
@@ -33,17 +34,19 @@ import Hylo.Core.Table (Table (..), TableSchema (..))
 -- | Internal state tracked during Query monadic composition.
 data QueryState = QueryState
   { qsNextScope :: !Int
+  , qsNextLateral :: !Int
   , qsRelations :: ![RelationBinding]
   , qsPredicates :: ![QExpr Bool]
+  , qsLaterals :: ![LateralBinding]
   }
   deriving (Eq, Show)
 
 instance NFData QueryState where
-  rnf (QueryState n r p) = rnf n `seq` rnf r `seq` rnf p
+  rnf (QueryState n l r p lat) = rnf n `seq` rnf l `seq` rnf r `seq` rnf p `seq` rnf lat
 
 -- | Default initial state for a new Query computation.
 initialQueryState :: QueryState
-initialQueryState = QueryState 0 [] []
+initialQueryState = QueryState 0 0 [] [] []
 
 -- | Pure operational Query monad parameterised by database backend marker.
 newtype Query db a = Query
