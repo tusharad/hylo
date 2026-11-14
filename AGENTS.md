@@ -252,6 +252,23 @@ All agents and contributors working on this codebase MUST follow this branching 
 42. **Monadic State Mutation Order in Bulk Operations (`foldl'` Prepend Symmetry):**
    In monadic transaction stores that prepend inserted keys (`(tName, key) : txStore st`), sequential insertion `insert r1 >> insert r2` accumulates records in reverse order (`[r2, r1]`). Bulk operations (`insertMany [r1, r2]`) must accumulate new records via `reverse [(tName, k) | k <- keys] ++ txStore st` to preserve the exact Law 1 FinalState list ordering invariant.
 
+43. **TypeApplication Whitespace Parsing Edge Cases with Type Literals (`GHC-95781`):**
+   In GHC 9.10+, writing `decodeBinaryVector @ "test-model" @3` with whitespace between `@` and the type string literal causes GHC's parser to interpret `@` as an infix operator application (`(@) "test-model" @3`), failing compilation with `[GHC-95781] Cannot apply expression of type 'a0' to a visible type argument '3'`.
+   * **Rule:** Avoid whitespace after `@` when using type application with literal types (e.g. `@"test-model"`). Better yet, use explicit type annotations `(decodeBinaryVector bytes :: Either String (Embedding "test-model" 3))` in tests and call sites to ensure completely unambiguous type inference.
+
+44. **`ConstraintKinds` Requirement for Constraint Type Synonyms (`GHC-75844`):**
+   Defining type synonyms that alias constraint families or classes (such as `type AssertSameEmbedding m1 d1 m2 d2 = AssertMatchingVectors m1 d1 m2 d2`) requires the `{-# LANGUAGE ConstraintKinds #-}` extension. Without it, GHC rejects the declaration with `[GHC-75844] Illegal constraint synonym of kind: Constraint`.
+   * **Rule:** Always enable `{-# LANGUAGE ConstraintKinds #-}` at the top of any module declaring type synonyms of kind `Constraint`.
+
+45. **Fourmolu `it` Expression Formatting across Versions (`$ do` vs `$` Chaining):**
+   In Fourmolu 0.21, writing `it "description" $ shouldNotTypecheckWith ...` without `do` formats the `$` operator on a newline (`it "description" \n $ shouldNotTypecheckWith ...`), which Fourmolu 0.17 (used in GitHub Actions CI) rejects as unformatted.
+   * **Rule:** Always write `it "description" $ do \n shouldNotTypecheckWith ...` in HSpec test suites. Including `$ do` ensures identical, idempotent formatting behavior across all Fourmolu versions.
+
+46. **Natural Representation in `GHC.TypeNats` (`Natural` vs `Integer`):**
+   `GHC.TypeNats.natVal` returns `GHC.Natural.Natural`, not `Integer` or `Int`. Attempting to return `natVal` directly from functions typed as `embeddingDim :: Embedding m d -> Integer` fails with a type mismatch error.
+   * **Rule:** Explicitly convert `Natural` via `toInteger (natVal proxy)` or `fromIntegral (natVal proxy)` when exposing integer dimensions.
+
+
 
 
 
