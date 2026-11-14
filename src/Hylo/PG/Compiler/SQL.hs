@@ -22,6 +22,7 @@ import Hylo.Core.Query.AST
   , LateralBinding (..)
   , Projectable (..)
   , renderExpr
+  , renderLockClause
   )
 import Hylo.Core.Query.Monad
   ( Query (..)
@@ -42,50 +43,65 @@ renderSQL q = fromString (T.unpack (renderSQLText q))
 renderSQLText :: Projectable a => Query Postgres a -> Text
 renderSQLText q =
   let (res, st) = runQuery q initialQueryState
-      cteClause = renderCTEs (qsCTEs st)
-      projections = projectColumns res
-      selectClause =
-        "SELECT "
-          <> (if null projections then "1" else T.intercalate ", " projections)
-      (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
-      mFromWithLaterals = case mFrom of
-        Nothing -> case qsLaterals st of
-          [] -> Nothing
-          (l : ls) ->
-            Just $
-              foldl
-                (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-                (FromTable (lbAlias l) (lbAlias l))
-                ls
-        Just baseItem ->
-          Just $
-            foldl
-              (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-              baseItem
-              (qsLaterals st)
-      fromClause = case mFromWithLaterals of
-        Nothing -> ""
-        Just item -> " FROM " <> renderFromItem item
-      whereClause = case wherePreds of
-        [] -> ""
-        (p : ps) ->
-          let combined = foldl (BinOpExpr "AND") p ps
-           in " WHERE " <> renderExpr combined
-      groupByClause = case qsGroupBy st of
-        [] -> ""
-        cols -> " GROUP BY " <> T.intercalate ", " cols
-      havingClause = case qsHaving st of
-        [] -> ""
-        (h : hs) ->
-          let combined = foldl (BinOpExpr "AND") h hs
-           in " HAVING " <> renderExpr combined
-      orderByClause = case qsOrderBy st of
-        [] -> ""
-        orders -> " ORDER BY " <> T.intercalate ", " orders
-   in cteClause
-        <> selectClause
-        <> fromClause
-        <> whereClause
-        <> groupByClause
-        <> havingClause
-        <> orderByClause
+   in case qsUpsert st of
+        Just upsertSql -> upsertSql
+        Nothing ->
+          let cteClause = renderCTEs (qsCTEs st)
+              projections = projectColumns res
+              selectClause =
+                "SELECT "
+                  <> (if null projections then "1" else T.intercalate ", " projections)
+              (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
+              mFromWithLaterals = case mFrom of
+                Nothing -> case qsLaterals st of
+                  [] -> Nothing
+                  (l : ls) ->
+                    Just $
+                      foldl
+                        (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+                        (FromTable (lbAlias l) (lbAlias l))
+                        ls
+                Just baseItem ->
+                  Just $
+                    foldl
+                      (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+                      baseItem
+                      (qsLaterals st)
+              fromClause = case mFromWithLaterals of
+                Nothing -> ""
+                Just item -> " FROM " <> renderFromItem item
+              whereClause = case wherePreds of
+                [] -> ""
+                (p : ps) ->
+                  let combined = foldl (BinOpExpr "AND") p ps
+                   in " WHERE " <> renderExpr combined
+              groupByClause = case qsGroupBy st of
+                [] -> ""
+                cols -> " GROUP BY " <> T.intercalate ", " cols
+              havingClause = case qsHaving st of
+                [] -> ""
+                (h : hs) ->
+                  let combined = foldl (BinOpExpr "AND") h hs
+                   in " HAVING " <> renderExpr combined
+              orderByClause = case qsOrderBy st of
+                [] -> ""
+                orders -> " ORDER BY " <> T.intercalate ", " orders
+              limitClause = case qsLimit st of
+                Nothing -> ""
+                Just n -> " LIMIT " <> T.pack (show n)
+              offsetClause = case qsOffset st of
+                Nothing -> ""
+                Just n -> " OFFSET " <> T.pack (show n)
+              lockClause = case qsLock st of
+                Nothing -> ""
+                Just lk -> " " <> renderLockClause lk
+           in cteClause
+                <> selectClause
+                <> fromClause
+                <> whereClause
+                <> groupByClause
+                <> havingClause
+                <> orderByClause
+                <> limitClause
+                <> offsetClause
+                <> lockClause

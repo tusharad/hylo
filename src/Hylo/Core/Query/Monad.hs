@@ -21,6 +21,8 @@ module Hylo.Core.Query.Monad
   , eachWith
   , where_
   , having
+  , limit
+  , offset
   ) where
 
 import Control.DeepSeq (NFData (..))
@@ -30,6 +32,7 @@ import Hylo.Core.Expr (QExpr)
 import Hylo.Core.Query.AST
   ( CTEBinding (..)
   , LateralBinding (..)
+  , LockClause (..)
   , RelationBinding (..)
   , ScopeId (..)
   , formatScope
@@ -47,16 +50,21 @@ data QueryState = QueryState
   , qsHaving :: ![QExpr Bool]
   , qsOrderBy :: ![Text]
   , qsCTEs :: ![CTEBinding]
+  , qsLimit :: !(Maybe Int)
+  , qsOffset :: !(Maybe Int)
+  , qsLock :: !(Maybe LockClause)
+  , qsUpsert :: !(Maybe Text)
   }
   deriving (Eq, Show)
 
 instance NFData QueryState where
-  rnf (QueryState n l r p lat gb hv ob ctes) =
-    rnf (n, l, r, p, lat, gb, hv, ob, ctes)
+  rnf (QueryState n l r p lat gb hv ob ctes lim off lk up) =
+    rnf (n, l, r, p, lat, gb, hv) `seq`
+      rnf (ob, ctes, lim, off, lk, up)
 
 -- | Default initial state for a new Query computation.
 initialQueryState :: QueryState
-initialQueryState = QueryState 0 0 [] [] [] [] [] [] []
+initialQueryState = QueryState 0 0 [] [] [] [] [] [] [] Nothing Nothing Nothing Nothing
 
 -- | Pure operational Query monad parameterised by database backend marker.
 newtype Query db a = Query
@@ -116,4 +124,16 @@ where_ cond = Query $ \s ->
 having :: QExpr Bool -> Query db ()
 having cond = Query $ \s ->
   let s' = s {qsHaving = qsHaving s ++ [cond]}
+   in ((), s')
+
+-- | Set a maximum row limit for the query.
+limit :: Int -> Query db ()
+limit n = Query $ \s ->
+  let s' = s {qsLimit = Just n}
+   in ((), s')
+
+-- | Set a row offset for the query.
+offset :: Int -> Query db ()
+offset n = Query $ \s ->
+  let s' = s {qsOffset = Just n}
    in ((), s')

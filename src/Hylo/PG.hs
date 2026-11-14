@@ -14,6 +14,8 @@ module Hylo.PG
   , module Hylo.PG.Compiler.SQL
   , module Hylo.PG.Compiler.Window
   , module Hylo.PG.Hydration.Graph
+  , module Hylo.PG.Mutation.Locking
+  , module Hylo.PG.Mutation.Upsert
   ) where
 
 import Hylo.PG.Codec.Binary
@@ -24,3 +26,5 @@ import Hylo.PG.Compiler.Lateral
 import Hylo.PG.Compiler.SQL
 import Hylo.PG.Compiler.Window
 import Hylo.PG.Hydration.Graph
+import Hylo.PG.Mutation.Locking
+import Hylo.PG.Mutation.Upsert

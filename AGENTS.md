@@ -194,6 +194,22 @@ All agents and contributors working on this codebase MUST follow this branching 
 27. **Monotonic Scope Allocation Across Recursive CTE Steps:**
    In recursive CTEs, scope IDs must be propagated monotonically from the base step into the recursive step and then into the outer query (`qsNextScope = qsNextScope prevStep`). Expecting the recursive step relation to start at alias index 0 (e.g. `"org_tree_0"`) fails because earlier relations in the base step and recursive step already consumed indices 0 and 1. Tests and SQL matchers must reflect the strictly monotonic scope allocation (`"org_tree_2"`, `"org_tree_3"`).
 
+28. **Overloaded String Literal Ambiguity with Generic Operators (`GHC-18872`, `GHC-18042`):**
+   When comparing a typed column (e.g. `job.status :: QExpr Text`) against an overloaded literal (`lit "pending"`), `lit :: Show a => a -> QExpr a` produces `(IsString a, Show a) => QExpr a`. In standard Haskell, defaulting rules only default `Num` classes; `IsString` remains unconstrained, causing GHC to fail with ambiguous type variable errors (`Couldn't match type 'CheckComparable Text b0' with 'True'`).
+   * **Rule:** When authoring test modules with unadorned string literals inside `lit "..."` comparisons, enable `{-# LANGUAGE ExtendedDefaultRules #-}` and declare `default (Text, Int64, Double)` at top-level, alongside `{-# OPTIONS_GHC -Wno-type-defaults #-}` to allow GHC to default string literals to `Text` without triggering `-Werror=type-defaults`.
+
+29. **Higher-Kinded Lambda Argument Inference in Mutation Combinators:**
+   When designing higher-order mutation combinators like `insertOnConflict schema row target (\current excluded -> [...])`, avoid making the lambda argument polymorphic via a typeclass `OnConflictHandler table handler`. Because GHC cannot infer the types of lambda binders `current` and `excluded` before resolving the typeclass, GHC reports ambiguous type variables (`r0`, `r1`).
+   * **Rule:** Concretely type the lambda callback in the combinator signature: `(table 'Expr -> table 'Expr -> [Assignment])`. This immediately supplies the types of `current` and `excluded` to GHC's bidirectional typechecker, eliminating binder ambiguity completely.
+
+30. **Preserving Monomorphic Backend Parameter on Dialect SQL Compilers:**
+   Attempting to overload dialect rendering functions like `renderSQL` across queries and mutation actions via an unconstrained typeclass (`class RenderSQL target`) destroys GHC's ability to propagate the concrete dialect marker (`Postgres`) down into local query bindings (e.g. `let q = ...; renderSQL q`). This leads to open-world type ambiguity errors on backend capabilities and spurious `-Wunused-do-bind` warnings on polymorphic statements.
+   * **Rule:** Keep `renderSQL :: (Projectable a, IsString s) => Query Postgres a -> s` monomorphic over the dialect marker `Postgres`. Model mutation statements (like `insertOnConflict`) as monadic actions that execute within `Query db (UpsertAction table)` and record their AST representation in `QueryState (qsUpsert)`.
+
+31. **Local Formatting Verification Prior to Git Push (`fourmolu`):**
+   CI strictly enforces `fourmolu --mode check` across all Haskell source trees (`src`, `app`, `test`, `Setup.hs`). Always run `fourmolu --mode check $(git ls-files 'src/**/*.hs' 'test/**/*.hs' 'app/**/*.hs' 'Setup.hs')` locally before committing to prevent PR CI format check failures. If discrepancies arise (e.g. multiline comment style or binary operator placement), apply `fourmolu --mode inplace <files>` immediately.
+
+
 
 
 

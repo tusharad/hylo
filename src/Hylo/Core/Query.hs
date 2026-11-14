@@ -25,14 +25,23 @@ module Hylo.Core.Query
   , FromRelation (..)
   , eachWith
   , where_
+  , limit
+  , offset
   , ScopeId (..)
   , formatScope
   , generateScopes
   , RelationBinding (..)
   , FromItem (..)
+  , LockStrength (..)
+  , LockWait (..)
+  , LockClause (..)
+  , renderLockClause
   , Projectable (..)
   , renderExpr
   , exprAliases
+
+    -- * Expressions
+  , module Hylo.Core.Expr
 
     -- * Aggregation & Grouping
   , module Hylo.Core.Query.Aggregate
@@ -63,15 +72,20 @@ import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Hylo.Core.Context (Ctx (..))
+import Hylo.Core.Expr
 import Hylo.Core.Key (Id)
 import Hylo.Core.Query.AST
   ( FromItem (..)
+  , LockClause (..)
+  , LockStrength (..)
+  , LockWait (..)
   , Projectable (..)
   , RelationBinding (..)
   , ScopeId (..)
   , exprAliases
   , formatScope
   , renderExpr
+  , renderLockClause
   )
 import Hylo.Core.Query.Aggregate
 import Hylo.Core.Query.CTE
@@ -81,6 +95,8 @@ import Hylo.Core.Query.Monad
   , QueryState (..)
   , eachWith
   , initialQueryState
+  , limit
+  , offset
   , runQuery
   , where_
   )
