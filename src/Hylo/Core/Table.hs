@@ -31,6 +31,8 @@ class Table (table :: Ctx -> Type) where
   toTableExpr :: Text -> table 'Meta -> table 'Expr
   tableExprColumns :: table 'Expr -> [Text]
   tableExprColumns _ = []
+  tableColumnsMeta :: table 'Meta -> [(Text, Text)]
+  tableColumnsMeta _ = []
 
 -- | Construct a typed SQL column expression for an alias and a column specification.
 colSpecExpr :: Text -> ColSpec a -> QExpr a

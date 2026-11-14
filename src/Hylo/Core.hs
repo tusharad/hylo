@@ -79,6 +79,7 @@ module Hylo.Core
   , Tx (..)
   , Changeset (..)
   , emptyChangeset
+  , FieldError (..)
   , insert
   , update
   , delete
@@ -125,6 +126,7 @@ module Hylo.Core
 
 import Hylo.Core.Codec
 import Hylo.Core.Context
+import Hylo.Core.Error
 import Hylo.Core.Expr
 import Hylo.Core.Key
 import Hylo.Core.Nullable

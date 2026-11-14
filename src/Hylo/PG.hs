@@ -22,6 +22,8 @@ module Hylo.PG
   , module Hylo.PG.Transaction.Retry
   , module Hylo.PG.Transaction.Hooks
   , module Hylo.PG.Pool.Routing
+  , module Hylo.PG.Mutation.Bulk
+  , module Hylo.PG.Error.Translation
   ) where
 
 import Hylo.PG.Codec.Binary
@@ -32,7 +34,9 @@ import Hylo.PG.Compiler.Lateral
 import Hylo.PG.Compiler.SQL
 import Hylo.PG.Compiler.Window
 import Hylo.PG.Connection
+import Hylo.PG.Error.Translation
 import Hylo.PG.Hydration.Graph
+import Hylo.PG.Mutation.Bulk
 import Hylo.PG.Mutation.Locking
 import Hylo.PG.Mutation.Upsert
 import Hylo.PG.Pool.Routing
