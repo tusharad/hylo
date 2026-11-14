@@ -20,6 +20,10 @@ module Hylo.Core.Query.AST
   , CTEType (..)
   , CTEBinding (..)
   , FromItem (..)
+  , LockStrength (..)
+  , LockWait (..)
+  , LockClause (..)
+  , renderLockClause
   , Projectable (..)
   , renderExpr
   , exprAliases
@@ -122,6 +126,55 @@ instance NFData FromItem where
     LeftJoinLateral l s a -> rnf l `seq` rnf s `seq` rnf a
     CrossJoin l r -> rnf l `seq` rnf r
 
+-- | Pessimistic locking strength in PostgreSQL.
+data LockStrength
+  = ForUpdate
+  | ForNoKeyUpdate
+  | ForShare
+  | ForKeyShare
+  deriving (Eq, Show)
+
+instance NFData LockStrength where
+  rnf x = x `seq` ()
+
+-- | Pessimistic locking wait policy.
+data LockWait
+  = LockWaitDefault
+  | SkipLocked
+  | NoWait
+  deriving (Eq, Show)
+
+instance NFData LockWait where
+  rnf x = x `seq` ()
+
+-- | Complete lock clause specification.
+data LockClause = LockClause
+  { lcStrength :: !LockStrength
+  , lcWait :: !LockWait
+  , lcTables :: ![Text]
+  }
+  deriving (Eq, Show)
+
+instance NFData LockClause where
+  rnf (LockClause s w ts) = rnf s `seq` rnf w `seq` rnf ts
+
+-- | Render a lock clause into PostgreSQL SQL syntax.
+renderLockClause :: LockClause -> Text
+renderLockClause (LockClause str wait tables) =
+  let strText = case str of
+        ForUpdate -> "FOR UPDATE"
+        ForNoKeyUpdate -> "FOR NO KEY UPDATE"
+        ForShare -> "FOR SHARE"
+        ForKeyShare -> "FOR KEY SHARE"
+      tablesText = case tables of
+        [] -> ""
+        ts -> " OF " <> T.intercalate ", " (map (\t -> "\"" <> t <> "\"") ts)
+      waitText = case wait of
+        LockWaitDefault -> ""
+        SkipLocked -> " SKIP LOCKED"
+        NoWait -> " NOWAIT"
+   in strText <> tablesText <> waitText
+
 -- | Render a typed QExpr into SQL text syntax.
 renderExpr :: QExpr a -> Text
 renderExpr = \case
@@ -129,7 +182,13 @@ renderExpr = \case
     "true" -> "TRUE"
     "false" -> "FALSE"
     _ -> t
-  ColExpr rel col -> "\"" <> rel <> "\".\"" <> col <> "\""
+  ColExpr rel col ->
+    if T.null rel
+      then "\"" <> col <> "\""
+      else
+        if rel == "EXCLUDED"
+          then "EXCLUDED.\"" <> col <> "\""
+          else "\"" <> rel <> "\".\"" <> col <> "\""
   BinOpExpr op l r ->
     if op == "=" && renderExpr r == "NULL"
       then "(" <> renderExpr l <> " IS NULL)"

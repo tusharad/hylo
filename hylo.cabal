@@ -53,6 +53,8 @@ library
       Hylo.PG.Compiler.SQL
       Hylo.PG.Compiler.Window
       Hylo.PG.Hydration.Graph
+      Hylo.PG.Mutation.Locking
+      Hylo.PG.Mutation.Upsert
       Lib
   other-modules:
       Paths_hylo
@@ -93,6 +95,7 @@ test-suite hylo-test
       Hylo.PG.Compiler.JoinFlattenerSpec
       Hylo.PG.Compiler.LateralSpec
       Hylo.PG.Compiler.WindowSpec
+      Hylo.PG.Mutation.UpsertSpec
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TypeErrorSpec
       Test.Hylo.PG.Compiler.AggregateSpec
@@ -100,6 +103,7 @@ test-suite hylo-test
       Test.Hylo.PG.Compiler.JoinFlattenerSpec
       Test.Hylo.PG.Compiler.LateralSpec
       Test.Hylo.PG.Compiler.WindowSpec
+      Test.Hylo.PG.Mutation.UpsertSpec
       Test.ShouldNotTypecheck
       Paths_hylo
   hs-source-dirs:

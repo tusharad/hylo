@@ -15,6 +15,7 @@ import qualified Hylo.PG.Compiler.CTESpec as CTESpec
 import qualified Hylo.PG.Compiler.JoinFlattenerSpec as JoinFlattenerSpec
 import qualified Hylo.PG.Compiler.LateralSpec as LateralSpec
 import qualified Hylo.PG.Compiler.WindowSpec as WindowSpec
+import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
 import Test.Hspec
 
 main :: IO ()
@@ -27,3 +28,4 @@ main = hspec $ do
   AggregateSpec.spec
   WindowSpec.spec
   CTESpec.spec
+  UpsertSpec.spec
