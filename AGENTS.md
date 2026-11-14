@@ -241,6 +241,17 @@ All agents and contributors working on this codebase MUST follow this branching 
    `shouldSatisfy :: (HasCallStack, Show a) => a -> (a -> Bool) -> Expectation` requires a `Show` instance for the inspected expression. When verifying results of higher-kinded types or AST records that omit `Show` (such as `AccountT 'Expr`), `res `shouldSatisfy` isRight` fails compilation with `[GHC-39999] No instance for (Show (AccountT 'Expr))`.
    * **Rule:** Use `isRight res `shouldBe` True` or pattern-match explicitly instead of `shouldSatisfy` when testing values lacking `Show` instances.
 
+40. **`MonoLocalBinds` with `AssertWritable mode` in Operational Monads (`GHC-62412`):**
+   When an operational mutation combinator (such as `insertMany`) is constrained by `AssertWritable mode`, GHC emits `[-Wsimplifiable-class-constraints]` because `AssertWritable mode` matches an instance head with an equality constraint `(CheckWritable mode ~ 'True) => AssertWritable mode`. Under `-Wall -Werror` / `--pedantic`, this warning causes build failures.
+   * **Rule:** Enable `{-# LANGUAGE MonoLocalBinds #-}` and `{-# LANGUAGE PolyKinds #-}` on any module declaring functions with `AssertWritable mode` signatures.
+
+41. **`renderBulkInsertSQL` Over Polymorphic String Targets (`IsString s`):**
+   When assertions like HSpec's `shouldContain` are invoked directly on the output of SQL renderers without explicit type signatures, typing the renderer as `TableSchema table -> [record] -> Text` leads to a type mismatch error (`Couldn't match expected type '[Char]' with actual type 'Text'`) because `shouldContain` operates on lists (`[a]`).
+   * **Rule:** Type SQL rendering combinators with `(IsString s) => TableSchema table -> [record] -> s` so they infer `Text`, `String`, or `ByteString` seamlessly based on caller context.
+
+42. **Monadic State Mutation Order in Bulk Operations (`foldl'` Prepend Symmetry):**
+   In monadic transaction stores that prepend inserted keys (`(tName, key) : txStore st`), sequential insertion `insert r1 >> insert r2` accumulates records in reverse order (`[r2, r1]`). Bulk operations (`insertMany [r1, r2]`) must accumulate new records via `reverse [(tName, k) | k <- keys] ++ txStore st` to preserve the exact Law 1 FinalState list ordering invariant.
+
 
 
 
