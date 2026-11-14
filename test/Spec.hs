@@ -18,6 +18,7 @@ import qualified Hylo.PG.Compiler.LateralSpec as LateralSpec
 import qualified Hylo.PG.Compiler.WindowSpec as WindowSpec
 import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
 import qualified Hylo.PG.Streaming.CursorSpec as CursorSpec
+import qualified Hylo.PG.Transaction.RetrySpec as RetrySpec
 import Test.Hspec
 
 main :: IO ()
@@ -33,3 +34,4 @@ main = hspec $ do
   CTESpec.spec
   UpsertSpec.spec
   CursorSpec.spec
+  RetrySpec.spec
