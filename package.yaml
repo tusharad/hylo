@@ -19,6 +19,7 @@ dependencies:
 - base >= 4.7 && < 5
 - text >= 1.2 && < 3
 - bytestring >= 0.10 && < 0.13
+- deepseq >= 1.4 && < 2
 
 ghc-options:
 - -Wall
@@ -57,3 +58,5 @@ tests:
     - hylo
     - hspec >= 2.11
     - QuickCheck >= 2.14
+    - should-not-typecheck >= 2.1
+    - deepseq >= 1.4

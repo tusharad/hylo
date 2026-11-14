@@ -16,7 +16,7 @@ module Hylo.Core
   , Id (..)
   , toId
 
-    -- * Expressions
+    -- * Expressions & Comparison Operators
   , QExpr (..)
   , lit
   , colExpr
@@ -25,6 +25,48 @@ module Hylo.Core
   , coalesce
   , (==.)
   , (/=.)
+  , (<.)
+  , (<=.)
+  , (>.)
+  , (>=.)
+
+    -- * Closed Type Family Diagnostics (E001–E015)
+  , AssertComparable (..)
+  , CheckComparable
+  , AssertGrouped (..)
+  , CheckGrouped
+  , AssertWritable (..)
+  , CheckWritable
+  , AssertNoIO (..)
+  , CheckNoIO
+  , AssertMatchingVectors (..)
+  , CheckMatchingVectors
+  , AssertBackendCapability (..)
+  , CheckBackendCapability
+  , AssertHasVersion (..)
+  , CheckHasVersion
+  , AssertParameterized (..)
+  , CheckParameterized
+  , AssertHasPrimaryKey (..)
+  , CheckHasPrimaryKey
+  , AssertValidForeignKey (..)
+  , CheckValidForeignKey
+  , AssertAcyclic (..)
+  , CheckAcyclic
+  , AssertPaginationValid (..)
+  , CheckPaginationValid
+  , AssertSafeMigration (..)
+  , CheckSafeMigration
+
+    -- * Transactions, Query & Changesets
+  , Postgres
+  , TxMode (..)
+  , Tx (..)
+  , Changeset (..)
+  , emptyChangeset
+  , insert
+  , update
+  , delete
 
     -- * Automatic Nullability Lifting
   , NullableTable (..)
@@ -69,4 +111,6 @@ import Hylo.Core.Context
 import Hylo.Core.Expr
 import Hylo.Core.Key
 import Hylo.Core.Nullable
+import Hylo.Core.Query
 import Hylo.Core.Schema
+import Hylo.Core.TypeError

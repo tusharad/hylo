@@ -127,4 +127,16 @@ All agents and contributors working on this codebase MUST follow this branching 
    Verifying the Applicative identity law `pure id <*> v == v` causes HLint to suggest replacing `pure id <*>` with `(id <$>)`.
    * **Rule:** Add `{-# HLINT ignore "Use <$>" #-}` to algebraic test modules to preserve explicit verification of the Applicative `<*>` identity law without tripping CI lint gates.
 
+9. **Breaking Circular Module Graphs via `PolyKinds`:**
+   When defining diagnostic assertion type families in `TypeError` that reference phantom keys (`Id table a`) or expressions (`QExpr a`), avoid importing high-level modules (like `Context`) from low-level foundation modules (`Key`). By enabling `{-# LANGUAGE PolyKinds #-}` on `newtype Id table a = Id { unId :: a }`, `table` can quantify over `Type`, `Ctx -> Type`, or any kind without `Key.hs` needing to import `Context.hs`. This keeps the module dependency graph acyclic (`Key -> TypeError -> Expr / Query -> Core`).
+
+10. **Rank-N Equality Constraints for Deferred Type Errors (`should-not-typecheck`):**
+   When asserting custom compiler diagnostics at runtime with `-fdefer-type-errors`, GHC evaluates deferred type errors at the call site if passed to a plain function parameter `a`. To prevent premature uncaught `TypeError` crashes before entering the exception handler, test helper assertions must quantify over an equality constraint `(() ~ () => a)` (matching `Test.ShouldNotTypecheck`'s RankN signature: `shouldNotTypecheckWith :: NFData a => String -> (() ~ () => a) -> Expectation`).
+
+11. **`PackageImports` for Local Wrapper Modules:**
+   When authoring test helper modules with the same module name as an external Hackage dependency (e.g., `Test.ShouldNotTypecheck`), use `{-# LANGUAGE PackageImports #-}` and `import qualified "should-not-typecheck" Test.ShouldNotTypecheck as SNT` to avoid cyclical self-imports.
+
+12. **Proxy Dictionaries for Custom TypeError Assertions:**
+   To evaluate closed type families that emit `TypeError`, define companion typeclasses with `Proxy` dictionary methods (`comparableDict :: Proxy a -> Proxy b -> ()`, `writableDict :: Proxy mode -> ()`). Forcing these dictionary methods in operator AST constructors or test assertions triggers the GHC diagnostic deterministically without ambiguous type application issues.
+
 

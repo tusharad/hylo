@@ -2,6 +2,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
 Module      : Hylo.Core.Expr
@@ -19,11 +20,19 @@ module Hylo.Core.Expr
   , coalesce
   , (==.)
   , (/=.)
+  , (<.)
+  , (<=.)
+  , (>.)
+  , (>=.)
+  , AssertComparable
   ) where
 
+import Control.DeepSeq (NFData (..))
 import Data.Kind (Type)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Hylo.Core.TypeError (AssertComparable (..))
 
 -- | Typed SQL AST expression representing an expression evaluating to type @a@.
 data QExpr (a :: Type) where
@@ -48,12 +57,19 @@ instance Show (QExpr a) where
           . shows r
     UnaryOpExpr op e ->
       showParen (d > 10) $
-        showString "UnaryOpExpr " . shows op . showString " " . shows e
+        showString "UnaryOpExpr "
+          . shows op
+          . showString " "
+          . shows e
     LiftNullableExpr e ->
-      showParen (d > 10) $ showString "LiftNullableExpr " . shows e
-    CoalesceExpr m def ->
       showParen (d > 10) $
-        showString "CoalesceExpr " . shows m . showString " " . shows def
+        showString "LiftNullableExpr " . shows e
+    CoalesceExpr m dflt ->
+      showParen (d > 10) $
+        showString "CoalesceExpr "
+          . shows m
+          . showString " "
+          . shows dflt
 
 instance Eq (QExpr a) where
   LitExpr t1 == LitExpr t2 = t1 == t2
@@ -65,6 +81,15 @@ instance Eq (QExpr a) where
   CoalesceExpr m1 d1 == CoalesceExpr m2 d2 =
     show m1 == show m2 && show d1 == show d2
   _ == _ = False
+
+instance NFData (QExpr a) where
+  rnf expr = case expr of
+    LitExpr t -> rnf t
+    ColExpr r c -> rnf r `seq` rnf c
+    BinOpExpr op l r -> rnf op `seq` rnf l `seq` rnf r
+    UnaryOpExpr op e -> rnf op `seq` rnf e
+    LiftNullableExpr e -> rnf e
+    CoalesceExpr m dflt -> rnf m `seq` rnf dflt
 
 -- | Construct a literal expression from any Show-able value.
 lit :: Show a => a -> QExpr a
@@ -86,14 +111,38 @@ isNull = UnaryOpExpr "IS NULL"
 coalesce :: QExpr (Maybe a) -> QExpr a -> QExpr a
 coalesce = CoalesceExpr
 
--- | Typed equality operator for expressions of identical type.
-(==.) :: QExpr a -> QExpr a -> QExpr Bool
-(==.) = BinOpExpr "="
+-- | Typed equality operator guarded by 'AssertComparable'.
+(==.) :: forall a b. AssertComparable a b => QExpr a -> QExpr b -> QExpr Bool
+(==.) l r = comparableDict (Proxy :: Proxy a) (Proxy :: Proxy b) `seq` BinOpExpr "=" l r
 
 infix 4 ==.
 
--- | Typed inequality operator for expressions of identical type.
-(/=.) :: QExpr a -> QExpr a -> QExpr Bool
-(/=.) = BinOpExpr "<>"
+-- | Typed inequality operator guarded by 'AssertComparable'.
+(/=.) :: forall a b. AssertComparable a b => QExpr a -> QExpr b -> QExpr Bool
+(/=.) l r = comparableDict (Proxy :: Proxy a) (Proxy :: Proxy b) `seq` BinOpExpr "<>" l r
 
 infix 4 /=.
+
+-- | Typed less-than operator guarded by 'AssertComparable'.
+(<.) :: forall a b. AssertComparable a b => QExpr a -> QExpr b -> QExpr Bool
+(<.) l r = comparableDict (Proxy :: Proxy a) (Proxy :: Proxy b) `seq` BinOpExpr "<" l r
+
+infix 4 <.
+
+-- | Typed less-than-or-equal operator guarded by 'AssertComparable'.
+(<=.) :: forall a b. AssertComparable a b => QExpr a -> QExpr b -> QExpr Bool
+(<=.) l r = comparableDict (Proxy :: Proxy a) (Proxy :: Proxy b) `seq` BinOpExpr "<=" l r
+
+infix 4 <=.
+
+-- | Typed greater-than operator guarded by 'AssertComparable'.
+(>.) :: forall a b. AssertComparable a b => QExpr a -> QExpr b -> QExpr Bool
+(>.) l r = comparableDict (Proxy :: Proxy a) (Proxy :: Proxy b) `seq` BinOpExpr ">" l r
+
+infix 4 >.
+
+-- | Typed greater-than-or-equal operator guarded by 'AssertComparable'.
+(>=.) :: forall a b. AssertComparable a b => QExpr a -> QExpr b -> QExpr Bool
+(>=.) l r = comparableDict (Proxy :: Proxy a) (Proxy :: Proxy b) `seq` BinOpExpr ">=" l r
+
+infix 4 >=.
