@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -57,12 +57,12 @@ module Hylo.Core.Query
   , module Hylo.Core.Query.Pagination
 
     -- * Transaction Monad & Modes
-  , TxMode (..)
-  , Tx (..)
+  , module Hylo.Core.Transaction
 
     -- * Changeset Abstraction
   , Changeset (..)
   , emptyChangeset
+  , withUniqueKey
 
     -- * Statically Guarded Mutations
   , insert
@@ -70,10 +70,10 @@ module Hylo.Core.Query
   , delete
   ) where
 
-import Control.DeepSeq (NFData (..))
 import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
+import Data.Text (Text)
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr
 import Hylo.Core.Key (Id)
@@ -106,40 +106,27 @@ import Hylo.Core.Query.Monad
 import Hylo.Core.Query.Pagination
 import Hylo.Core.Query.Recursive
 import Hylo.Core.Query.Window
-import Hylo.Core.Table (TableSchema)
-import Hylo.Core.TypeError (AssertWritable (..), TxMode (..))
+import Hylo.Core.Table (TableSchema (..))
+import Hylo.Core.Transaction
+import Hylo.Core.TypeError (AssertWritable (..))
 import Hylo.PG.Compiler.JoinFlattener (generateScopes)
 
 -- | Phantom type identifying the PostgreSQL database engine.
 data Postgres
 
--- | Atomic transaction computation parameterized by database and mode.
-data Tx db (mode :: TxMode) a
-  = TxReturn a
-  | TxEmpty
-  deriving (Eq, Show, Functor)
-
-instance Applicative (Tx db mode) where
-  pure = TxReturn
-  TxReturn f <*> TxReturn a = TxReturn (f a)
-  _ <*> _ = TxEmpty
-
-instance Monad (Tx db mode) where
-  TxReturn a >>= f = f a
-  TxEmpty >>= _ = TxEmpty
-
-instance NFData a => NFData (Tx db mode a) where
-  rnf (TxReturn a) = rnf a
-  rnf TxEmpty = ()
-
 -- | Changeset descriptor for table records.
-newtype Changeset (table :: Ctx -> Type) = Changeset
+data Changeset (table :: Ctx -> Type) = Changeset
   { changesetPatch :: table 'Patch
+  , changesetKey :: !Text
   }
 
 -- | Construct an empty changeset.
 emptyChangeset :: table 'Patch -> Changeset table
-emptyChangeset = Changeset
+emptyChangeset patch = Changeset patch ""
+
+-- | Attach a simulated unique key for conflict detection in transactions.
+withUniqueKey :: Text -> Changeset table -> Changeset table
+withUniqueKey key cs = cs {changesetKey = key}
 
 -- | Statically guarded insert operation. Fails with [Hylo Error E005] in ReadOnly mode.
 insert ::
@@ -148,7 +135,20 @@ insert ::
   TableSchema table ->
   Changeset table ->
   Tx db mode (table 'Result)
-insert _ _ = writableDict (Proxy :: Proxy mode) `seq` TxEmpty
+insert schema cs =
+  writableDict (Proxy :: Proxy mode) `seq`
+    TxAction $ \st ->
+      let tName = tableName schema
+          key = changesetKey cs
+       in if key /= "" && elem (tName, key) (txStore st)
+            then Left (TxConstraintViolation tName "unique_constraint" key)
+            else
+              let st' =
+                    st
+                      { txStore = if key /= "" then (tName, key) : txStore st else txStore st
+                      , txOperations = txOperations st ++ [OpMutate ("INSERT INTO " <> tName)]
+                      }
+               in Right (errorWithoutStackTrace "insert: simulated entity hydration", st')
 
 -- | Statically guarded update operation. Fails with [Hylo Error E005] in ReadOnly mode.
 update ::
@@ -157,7 +157,11 @@ update ::
   TableSchema table ->
   Changeset table ->
   Tx db mode (table 'Result)
-update _ _ = writableDict (Proxy :: Proxy mode) `seq` TxEmpty
+update schema _ =
+  writableDict (Proxy :: Proxy mode) `seq`
+    TxAction $ \st ->
+      let st' = st {txOperations = txOperations st ++ [OpMutate ("UPDATE " <> tableName schema)]}
+       in Right (errorWithoutStackTrace "update: simulated entity hydration", st')
 
 -- | Statically guarded delete operation. Fails with [Hylo Error E005] in ReadOnly mode.
 delete ::
@@ -166,4 +170,8 @@ delete ::
   TableSchema table ->
   Id table Int64 ->
   Tx db mode ()
-delete _ _ = writableDict (Proxy :: Proxy mode) `seq` TxEmpty
+delete schema _ =
+  writableDict (Proxy :: Proxy mode) `seq`
+    TxAction $ \st ->
+      let st' = st {txOperations = txOperations st ++ [OpMutate ("DELETE FROM " <> tableName schema)]}
+       in Right ((), st')

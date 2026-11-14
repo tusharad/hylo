@@ -17,6 +17,8 @@ module Hylo.PG
   , module Hylo.PG.Mutation.Locking
   , module Hylo.PG.Mutation.Upsert
   , module Hylo.PG.Streaming.Cursor
+  , module Hylo.PG.Connection
+  , module Hylo.PG.Transaction.Savepoint
   ) where
 
 import Hylo.PG.Codec.Binary
@@ -26,7 +28,9 @@ import Hylo.PG.Compiler.JoinFlattener
 import Hylo.PG.Compiler.Lateral
 import Hylo.PG.Compiler.SQL
 import Hylo.PG.Compiler.Window
+import Hylo.PG.Connection
 import Hylo.PG.Hydration.Graph
 import Hylo.PG.Mutation.Locking
 import Hylo.PG.Mutation.Upsert
 import Hylo.PG.Streaming.Cursor
+import Hylo.PG.Transaction.Savepoint

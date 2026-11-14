@@ -36,6 +36,7 @@ import Hylo.Core.Query
   ( desc
   , limit
   , orderBy
+  , runTxPure
   )
 import Hylo.Core.Query.Pagination
   ( SeekDirection (..)
@@ -118,8 +119,9 @@ documentTable =
 
 -- | Unpack a pure transaction computation.
 runTx :: Tx db mode a -> a
-runTx (TxReturn a) = a
-runTx TxEmpty = error "Unexpected empty transaction in test"
+runTx tx = case runTxPure tx of
+  Right a -> a
+  Left err -> error ("Unexpected transaction error in test: " ++ show err)
 
 -- | Simulated document for pure property checking.
 data DocRow = DocRow

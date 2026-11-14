@@ -217,6 +217,14 @@ All agents and contributors working on this codebase MUST follow this branching 
    Postpositive qualified imports (`import Data.Text qualified as T`) are rejected by GHC with `[GHC-87491]` unless the `ImportQualifiedPost` language extension is enabled.
    * **Rule:** Always use standard Haskell2010 prepositive qualified syntax (`import qualified Data.Text as T`) unless `{-# LANGUAGE ImportQualifiedPost #-}` is explicitly turned on at module header.
 
+34. **HLint and Restricted Functions in Library Code (`errorWithoutStackTrace` vs `error`/`undefined`):**
+   HLint enforces strict `Avoid restricted function` on `error` and `undefined`. While test suites can disable this via `{-# HLINT ignore "Avoid restricted function" #-}`, placing HLINT ignore pragmas in library modules (`src/`) triggers GHC's `[-Wunrecognised-pragmas, Werror=unrecognised-pragmas]` under `-Wall -Werror` / `--pedantic` unless `-Wno-unrecognised-pragmas` is enabled.
+   * **Rule:** In library source code (`src/`), use `errorWithoutStackTrace` from `Prelude` instead of `error` or `undefined` for unreachable states or simulated AST branches, which satisfies HLint without requiring pragma ignores or compiler warning suppressions.
+
+35. **Phantom Mode Type Ambiguity in Operational Transaction Do-Blocks (`AssertWritable` & Injective Deduction):**
+   When mutation actions (`insert`, `update`, `delete`) in a transaction monad `Tx db (mode :: TxMode) a` are statically guarded by a closed type family assertion (`AssertWritable mode` via `CheckWritable mode ~ 'True`), do-blocks without top-level type signatures leave `mode` unconstrained. Because closed type families in GHC are not injective by default, GHC cannot infer that `CheckWritable mode ~ 'True` requires `mode = 'ReadWrite`, causing `[GHC-18872] The type variable 'mode' is ambiguous`.
+   * **Rule:** When evaluating transactional expressions via pure test runners or runners parameterized by runtime modes (`runTx pool ReadWrite`), ensure transaction do-blocks or let-bindings have explicit type annotations `tx :: Tx Postgres 'ReadWrite a` so that GHC can immediately verify `CheckWritable 'ReadWrite ~ 'True` at compile time without ambiguity.
+
 
 
 
