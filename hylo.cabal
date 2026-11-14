@@ -34,8 +34,10 @@ library
       Hylo.Core.Expr
       Hylo.Core.Key
       Hylo.Core.Nullable
+      Hylo.Core.Query
       Hylo.Core.Schema
       Hylo.Core.Table
+      Hylo.Core.TypeError
       Hylo.PG
       Hylo.PG.Codec.Binary
       Lib
@@ -47,6 +49,7 @@ library
   build-depends:
       base >=4.7 && <5
     , bytestring >=0.10 && <0.13
+    , deepseq >=1.4 && <2
     , text >=1.2 && <3
   default-language: Haskell2010
 
@@ -60,6 +63,7 @@ executable hylo-exe
   build-depends:
       base >=4.7 && <5
     , bytestring >=0.10 && <0.13
+    , deepseq >=1.4 && <2
     , hylo
     , text >=1.2 && <3
   default-language: Haskell2010
@@ -70,7 +74,10 @@ test-suite hylo-test
   other-modules:
       Hylo.Core.CodecSpec
       Hylo.Core.TableSpec
+      Hylo.Core.TypeErrorSpec
       Test.Hylo.Core.CodecSpec
+      Test.Hylo.Core.TypeErrorSpec
+      Test.ShouldNotTypecheck
       Paths_hylo
   hs-source-dirs:
       test
@@ -79,7 +86,9 @@ test-suite hylo-test
       QuickCheck >=2.14
     , base >=4.7 && <5
     , bytestring >=0.10 && <0.13
+    , deepseq >=1.4
     , hspec >=2.11
     , hylo
+    , should-not-typecheck >=2.1
     , text >=1.2 && <3
   default-language: Haskell2010
