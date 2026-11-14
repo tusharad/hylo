@@ -20,6 +20,7 @@ import qualified Hylo.PG.Mutation.BulkSpec as BulkSpec
 import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
 import qualified Hylo.PG.Streaming.CursorSpec as CursorSpec
 import qualified Hylo.PG.Transaction.RetrySpec as RetrySpec
+import qualified Hylo.PG.VectorSpec as VectorSpec
 import Test.Hspec
 
 main :: IO ()
@@ -37,3 +38,4 @@ main = hspec $ do
   CursorSpec.spec
   RetrySpec.spec
   BulkSpec.spec
+  VectorSpec.spec

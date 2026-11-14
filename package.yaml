@@ -22,6 +22,7 @@ dependencies:
 - deepseq >= 1.4 && < 2
 - time >= 1.9 && < 2
 - stm >= 2.5 && < 3
+- vector >= 0.12 && < 0.14
 
 ghc-options:
 - -Wall
