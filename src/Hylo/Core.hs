@@ -58,6 +58,21 @@ module Hylo.Core
   , AssertSafeMigration (..)
   , CheckSafeMigration
 
+    -- * Operational Query Monad & Relational AST
+  , Query (..)
+  , QueryState (..)
+  , initialQueryState
+  , each
+  , eachWith
+  , where_
+  , ScopeId (..)
+  , formatScope
+  , generateScopes
+  , RelationBinding (..)
+  , FromItem (..)
+  , Projectable (..)
+  , renderExpr
+
     -- * Transactions, Query & Changesets
   , Postgres
   , TxMode (..)
@@ -77,6 +92,8 @@ module Hylo.Core
     -- * Schema & Table Definitions
   , TableSchema (..)
   , tableSchema
+  , Table (..)
+  , colSpecExpr
   , column
   , nullableColumn
   , primaryKey
@@ -113,4 +130,5 @@ import Hylo.Core.Key
 import Hylo.Core.Nullable
 import Hylo.Core.Query
 import Hylo.Core.Schema
+import Hylo.Core.Table
 import Hylo.Core.TypeError

@@ -139,4 +139,14 @@ All agents and contributors working on this codebase MUST follow this branching 
 12. **Proxy Dictionaries for Custom TypeError Assertions:**
    To evaluate closed type families that emit `TypeError`, define companion typeclasses with `Proxy` dictionary methods (`comparableDict :: Proxy a -> Proxy b -> ()`, `writableDict :: Proxy mode -> ()`). Forcing these dictionary methods in operator AST constructors or test assertions triggers the GHC diagnostic deterministically without ambiguous type application issues.
 
+13. **HSpec `shouldContain` Type Signature & Polymorphic SQL Rendering:**
+   `Test.Hspec.shouldContain` requires `[a]` (`String`), and will not typecheck when applied directly to `Data.Text.Text`. Rendering functions (`renderSQL`) should be typed with `(Projectable a, IsString s) => Query db a -> s` to unify automatically with `String` in test assertions and `Text` in production adapters without requiring `T.unpack` at call sites.
+
+14. **HLint Monad Law Warnings in Algebraic Property Suites:**
+   Verifying monadic laws (`pure n >>= f == f n`, `m >>= pure == m`, `\x -> f x >>= g == f >=> g`) causes HLint to flag them as redundant simplifications. Add `{-# HLINT ignore "Monad law, left identity" #-}`, `{-# HLINT ignore "Monad law, right identity" #-}`, and `{-# HLINT ignore "Use >=>" #-}` to property test suites verifying monad instances.
+
+15. **Duplicate Exports with Type Constructor Records (`GHC-47854`):**
+   Exporting a data/newtype constructor with wildcards (e.g. `Query (..)`) alongside its individual record fields or methods (e.g. `runQuery`) triggers `[GHC-47854] [-Wduplicate-exports]`. If `Type (..)` is exported, omit standalone mentions of its field accessors.
+
+
 
