@@ -171,22 +171,30 @@ instance
       (Proxy :: Proxy (ColName a))
       (Proxy :: Proxy (IsGroupMember (QExpr a) grouped))
 
+-- | Combine two evaluated dictionary tokens strictly.
+combineDicts :: () -> () -> ()
+combineDicts () () = ()
+
 instance
   (ValidAggProjection grouped a, ValidAggProjection grouped b) =>
   ValidAggProjection grouped (a, b)
   where
   validAggDict pG _ =
-    validAggDict pG (Proxy :: Proxy a) `seq`
-      validAggDict pG (Proxy :: Proxy b)
+    combineDicts
+      (validAggDict pG (Proxy :: Proxy a))
+      (validAggDict pG (Proxy :: Proxy b))
 
 instance
   (ValidAggProjection grouped a, ValidAggProjection grouped b, ValidAggProjection grouped c) =>
   ValidAggProjection grouped (a, b, c)
   where
   validAggDict pG _ =
-    validAggDict pG (Proxy :: Proxy a)
-      `seq` validAggDict pG (Proxy :: Proxy b)
-      `seq` validAggDict pG (Proxy :: Proxy c)
+    combineDicts
+      (validAggDict pG (Proxy :: Proxy a))
+      ( combineDicts
+          (validAggDict pG (Proxy :: Proxy b))
+          (validAggDict pG (Proxy :: Proxy c))
+      )
 
 instance
   ( ValidAggProjection grouped a
@@ -197,10 +205,15 @@ instance
   ValidAggProjection grouped (a, b, c, d)
   where
   validAggDict pG _ =
-    validAggDict pG (Proxy :: Proxy a)
-      `seq` validAggDict pG (Proxy :: Proxy b)
-      `seq` validAggDict pG (Proxy :: Proxy c)
-      `seq` validAggDict pG (Proxy :: Proxy d)
+    combineDicts
+      (validAggDict pG (Proxy :: Proxy a))
+      ( combineDicts
+          (validAggDict pG (Proxy :: Proxy b))
+          ( combineDicts
+              (validAggDict pG (Proxy :: Proxy c))
+              (validAggDict pG (Proxy :: Proxy d))
+          )
+      )
 
 instance
   ( ValidAggProjection grouped a
@@ -212,11 +225,18 @@ instance
   ValidAggProjection grouped (a, b, c, d, e)
   where
   validAggDict pG _ =
-    validAggDict pG (Proxy :: Proxy a)
-      `seq` validAggDict pG (Proxy :: Proxy b)
-      `seq` validAggDict pG (Proxy :: Proxy c)
-      `seq` validAggDict pG (Proxy :: Proxy d)
-      `seq` validAggDict pG (Proxy :: Proxy e)
+    combineDicts
+      (validAggDict pG (Proxy :: Proxy a))
+      ( combineDicts
+          (validAggDict pG (Proxy :: Proxy b))
+          ( combineDicts
+              (validAggDict pG (Proxy :: Proxy c))
+              ( combineDicts
+                  (validAggDict pG (Proxy :: Proxy d))
+                  (validAggDict pG (Proxy :: Proxy e))
+              )
+          )
+      )
 
 -- | Execute an aggregation block within the operational Query monad.
 aggregate ::
