@@ -206,6 +206,10 @@ All agents and contributors working on this codebase MUST follow this branching 
    Attempting to overload dialect rendering functions like `renderSQL` across queries and mutation actions via an unconstrained typeclass (`class RenderSQL target`) destroys GHC's ability to propagate the concrete dialect marker (`Postgres`) down into local query bindings (e.g. `let q = ...; renderSQL q`). This leads to open-world type ambiguity errors on backend capabilities and spurious `-Wunused-do-bind` warnings on polymorphic statements.
    * **Rule:** Keep `renderSQL :: (Projectable a, IsString s) => Query Postgres a -> s` monomorphic over the dialect marker `Postgres`. Model mutation statements (like `insertOnConflict`) as monadic actions that execute within `Query db (UpsertAction table)` and record their AST representation in `QueryState (qsUpsert)`.
 
+31. **Local Formatting Verification Prior to Git Push (`fourmolu`):**
+   CI strictly enforces `fourmolu --mode check` across all Haskell source trees (`src`, `app`, `test`, `Setup.hs`). Always run `fourmolu --mode check $(git ls-files 'src/**/*.hs' 'test/**/*.hs' 'app/**/*.hs' 'Setup.hs')` locally before committing to prevent PR CI format check failures. If discrepancies arise (e.g. multiline comment style or binary operator placement), apply `fourmolu --mode inplace <files>` immediately.
+
+
 
 
 
