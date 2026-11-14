@@ -225,6 +225,10 @@ All agents and contributors working on this codebase MUST follow this branching 
    When mutation actions (`insert`, `update`, `delete`) in a transaction monad `Tx db (mode :: TxMode) a` are statically guarded by a closed type family assertion (`AssertWritable mode` via `CheckWritable mode ~ 'True`), do-blocks without top-level type signatures leave `mode` unconstrained. Because closed type families in GHC are not injective by default, GHC cannot infer that `CheckWritable mode ~ 'True` requires `mode = 'ReadWrite`, causing `[GHC-18872] The type variable 'mode' is ambiguous`.
    * **Rule:** When evaluating transactional expressions via pure test runners or runners parameterized by runtime modes (`runTx pool ReadWrite`), ensure transaction do-blocks or let-bindings have explicit type annotations `tx :: Tx Postgres 'ReadWrite a` so that GHC can immediately verify `CheckWritable 'ReadWrite ~ 'True` at compile time without ambiguity.
 
+36. **Fourmolu Operator Placement and Dollar Chaining across Versions (0.17 vs 0.21):**
+   Fourmolu 0.21 formats chained `$` operators across multiline expressions with leading `$` operators (`\n  $ ...`), whereas CI's Fourmolu 0.17 enforces trailing `$` operators (`... $\n  ...`), causing CI format check failures.
+   * **Rule:** Avoid multi-operator `$` chaining over multiline expressions. Use single `$` applications or direct record constructor arguments (e.g. `withUniqueKey name $ emptyChangeset User { ... }` rather than `withUniqueKey name $ emptyChangeset $ User { ... }`), which format consistently across both Fourmolu 0.17 and 0.21.
+
 
 
 

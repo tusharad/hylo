@@ -87,22 +87,22 @@ userTable =
 -- | Construct a valid user changeset.
 validUser :: Text -> Changeset UserT
 validUser name =
-  withUniqueKey name
-    $ emptyChangeset
-    $ User
-      { id = SetTo (toId 1)
-      , email = SetTo (name <> "@example.com")
-      }
+  withUniqueKey name $
+    emptyChangeset
+      User
+        { id = SetTo (toId 1)
+        , email = SetTo (name <> "@example.com")
+        }
 
 -- | Construct a duplicate user changeset conflicting on unique key.
 duplicateUser :: Text -> Changeset UserT
 duplicateUser name =
-  withUniqueKey name
-    $ emptyChangeset
-    $ User
-      { id = SetTo (toId 2)
-      , email = SetTo (name <> "@example.com")
-      }
+  withUniqueKey name $
+    emptyChangeset
+      User
+        { id = SetTo (toId 2)
+        , email = SetTo (name <> "@example.com")
+        }
 
 spec :: Spec
 spec = describe "Epic 11: Lexically Isolated Tx Monad & Savepoints" $ do
