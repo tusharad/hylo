@@ -229,6 +229,18 @@ All agents and contributors working on this codebase MUST follow this branching 
    Fourmolu 0.21 formats chained `$` operators across multiline expressions with leading `$` operators (`\n  $ ...`), whereas CI's Fourmolu 0.17 enforces trailing `$` operators (`... $\n  ...`), causing CI format check failures.
    * **Rule:** Avoid multi-operator `$` chaining over multiline expressions. Use single `$` applications or direct record constructor arguments (e.g. `withUniqueKey name $ emptyChangeset User { ... }` rather than `withUniqueKey name $ emptyChangeset $ User { ... }`), which format consistently across both Fourmolu 0.17 and 0.21.
 
+37. **`package.yaml` Authority Over `hylo.cabal` (`hpack` Synchronization):**
+   In projects managed by `hpack`, `hylo.cabal` is generated automatically from `package.yaml`. Adding new package dependencies (e.g. `stm >= 2.5 && < 3`) directly to `hylo.cabal` will be overwritten whenever `stack` or `hpack` runs.
+   * **Rule:** Always add new package dependencies directly to the top-level `dependencies` section in `package.yaml` before running `stack build` or `stack test`.
+
+38. **State Preservation Across Monadic Failures in Transaction Monads (`TxAction`):**
+   When modeling state in a transaction monad `Tx` that supports rollback hooks, savepoints, or mutation logs, defining `TxAction` as `TxState -> Either TxError (a, TxState)` discards all accumulated state when an action fails (`Left err`). This prevents `executeRollbackHooks`, retry counters, or diagnostic logs registered before the failure from executing upon abort.
+   * **Rule:** Define the state transition function as `TxState -> (Either TxError a, TxState)`. This ensures `executeTx` returns the final state alongside `Either TxError a`, allowing abort handlers to execute accumulated rollback hooks and outer retry loops to preserve attempt counters.
+
+39. **`Show` Constraint on HSpec Assertion Helpers (`shouldSatisfy` vs `shouldBe`):**
+   `shouldSatisfy :: (HasCallStack, Show a) => a -> (a -> Bool) -> Expectation` requires a `Show` instance for the inspected expression. When verifying results of higher-kinded types or AST records that omit `Show` (such as `AccountT 'Expr`), `res `shouldSatisfy` isRight` fails compilation with `[GHC-39999] No instance for (Show (AccountT 'Expr))`.
+   * **Rule:** Use `isRight res `shouldBe` True` or pattern-match explicitly instead of `shouldSatisfy` when testing values lacking `Show` instances.
+
 
 
 
