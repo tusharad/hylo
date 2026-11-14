@@ -162,9 +162,10 @@ streamDrain = \case
   Effect m -> m >>= streamDrain
   Step (_ :> rest) -> streamDrain rest
 
--- | Construct a chunked stream from an in-memory list using batch size @k@.
--- Models cursor batching: elements within a batch of size @k@ are processed,
--- keeping heap occupancy bounded by O(k) irrespective of total size @n@.
+{- | Construct a chunked stream from an in-memory list using batch size @k@.
+Models cursor batching: elements within a batch of size @k@ are processed,
+keeping heap occupancy bounded by O(k) irrespective of total size @n@.
+-}
 streamFromList :: Monad m => Int -> [a] -> Stream (Of a) m ()
 streamFromList k = go
   where
@@ -177,9 +178,10 @@ streamFromList k = go
     yieldChunk [] next = next
     yieldChunk (x : xs) next = Step (x :> yieldChunk xs next)
 
--- | Stream query results in chunks using a server-side cursor.
--- Employs a binary server-side cursor ('DECLARE ... NO SCROLL CURSOR WITHOUT HOLD'),
--- fetching batches of @batchSize@ rows over the wire and yielding elements lazily.
+{- | Stream query results in chunks using a server-side cursor.
+Employs a binary server-side cursor ('DECLARE ... NO SCROLL CURSOR WITHOUT HOLD'),
+fetching batches of @batchSize@ rows over the wire and yielding elements lazily.
+-}
 streamQuery ::
   Projectable a =>
   Int ->

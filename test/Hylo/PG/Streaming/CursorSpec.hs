@@ -260,7 +260,8 @@ spec = describe "Epic 10: Binary Cursor Streaming & Keyset Pagination" $ do
             limit 25
             pure doc
           sql = renderSQL q
-      sql `shouldContain` "(\"documents_0\".\"org_id\", \"documents_0\".\"created_at\", \"documents_0\".\"id\") < ($1, $2, $3)"
+      sql
+        `shouldContain` "(\"documents_0\".\"org_id\", \"documents_0\".\"created_at\", \"documents_0\".\"id\") < ($1, $2, $3)"
 
     it "supports explicitly directed keyset seeks (seekAfterDir and seekBeforeDir)" $ do
       let cursor = (read "2026-01-01 00:00:00 UTC", Id 54321 :: Id DocumentT Int64)
