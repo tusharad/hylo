@@ -44,6 +44,7 @@ library
       Hylo.Core.Query.Window
       Hylo.Core.Schema
       Hylo.Core.Table
+      Hylo.Core.Transaction
       Hylo.Core.TypeError
       Hylo.PG
       Hylo.PG.Codec.Binary
@@ -53,10 +54,12 @@ library
       Hylo.PG.Compiler.Lateral
       Hylo.PG.Compiler.SQL
       Hylo.PG.Compiler.Window
+      Hylo.PG.Connection
       Hylo.PG.Hydration.Graph
       Hylo.PG.Mutation.Locking
       Hylo.PG.Mutation.Upsert
       Hylo.PG.Streaming.Cursor
+      Hylo.PG.Transaction.Savepoint
       Lib
   other-modules:
       Paths_hylo
@@ -93,6 +96,7 @@ test-suite hylo-test
   other-modules:
       Hylo.Core.CodecSpec
       Hylo.Core.TableSpec
+      Hylo.Core.TransactionSpec
       Hylo.Core.TypeErrorSpec
       Hylo.PG.Compiler.AggregateSpec
       Hylo.PG.Compiler.CTESpec
@@ -102,6 +106,7 @@ test-suite hylo-test
       Hylo.PG.Mutation.UpsertSpec
       Hylo.PG.Streaming.CursorSpec
       Test.Hylo.Core.CodecSpec
+      Test.Hylo.Core.TransactionSpec
       Test.Hylo.Core.TypeErrorSpec
       Test.Hylo.PG.Compiler.AggregateSpec
       Test.Hylo.PG.Compiler.CTESpec

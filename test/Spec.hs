@@ -9,6 +9,7 @@ module Main (main) where
 
 import qualified Hylo.Core.CodecSpec as CodecSpec
 import qualified Hylo.Core.TableSpec as TableSpec
+import qualified Hylo.Core.TransactionSpec as TransactionSpec
 import qualified Hylo.Core.TypeErrorSpec as TypeErrorSpec
 import qualified Hylo.PG.Compiler.AggregateSpec as AggregateSpec
 import qualified Hylo.PG.Compiler.CTESpec as CTESpec
@@ -22,6 +23,7 @@ import Test.Hspec
 main :: IO ()
 main = hspec $ do
   TableSpec.spec
+  TransactionSpec.spec
   CodecSpec.spec
   TypeErrorSpec.spec
   JoinFlattenerSpec.spec
