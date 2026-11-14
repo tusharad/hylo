@@ -1,0 +1,18 @@
+.stack-work/
+**/.stack-work/
+.hie/
+**/.hie/
+*~
+*.yaml.lock
+*.cabal.orig
+
+# Cabal
+dist-newstyle/
+**/dist-newstyle/
+
+# OS & Editor
+.DS_Store
+*.swp
+*.swo
+.env
+.env.local

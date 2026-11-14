@@ -1,0 +1,135 @@
+name: Release to Hackage
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish_to_hackage:
+        description: 'Publish source packages (.tar.gz) to Hackage'
+        required: true
+        type: boolean
+        default: true
+      publish_docs:
+        description: 'Build and publish Haddock documentation (-docs.tar.gz) to Hackage'
+        required: true
+        type: boolean
+        default: true
+      as_candidate:
+        description: 'Publish as package candidate on Hackage'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-package:
+    name: Validate and Build Sdist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up GHC and Cabal
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.8.4'
+          cabal-version: 'latest'
+
+      - name: Cache cabal store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cabal/store
+            dist-newstyle
+          key: ${{ runner.os }}-cabal-release-${{ hashFiles('**/*.cabal', 'cabal.project') }}
+          restore-keys: |
+            ${{ runner.os }}-cabal-release-
+
+      - name: Run cabal check
+        run: cabal check
+
+      - name: Generate sdist tarball
+        run: |
+          mkdir -p artifacts
+          cabal sdist -o artifacts/
+          echo "Generated packages in artifacts/:"
+          ls -la artifacts/
+
+      - name: Generate Haddock documentation tarball
+        if: github.event_name == 'push' || inputs.publish_docs == true
+        run: |
+          mkdir -p artifacts/docs
+          DOCS_DIR=$(mktemp -d dist-docs.XXXXXX)
+          cabal v2-haddock --builddir="$DOCS_DIR" --haddock-for-hackage --enable-doc
+          find "$DOCS_DIR" -name "*-docs.tar.gz" -exec cp {} artifacts/docs/ \;
+          rm -rf "$DOCS_DIR"
+          echo "Generated documentation tarballs in artifacts/docs/:"
+          ls -la artifacts/docs/
+
+      - name: Upload sdist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hackage-sdists
+          path: artifacts/*.tar.gz
+
+      - name: Upload documentation artifacts
+        if: github.event_name == 'push' || inputs.publish_docs == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: hackage-docs
+          path: artifacts/docs/*-docs.tar.gz
+
+  publish-hackage:
+    name: Publish to Hackage
+    needs: validate-and-package
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.publish_to_hackage == true || inputs.publish_docs == true
+    steps:
+      - name: Set up Cabal
+        uses: haskell-actions/setup@v2
+        with:
+          cabal-version: 'latest'
+
+      - name: Download sdist artifacts
+        if: github.event_name == 'push' || inputs.publish_to_hackage == true
+        uses: actions/download-artifact@v4
+        with:
+          name: hackage-sdists
+          path: artifacts
+
+      - name: Download doc artifacts
+        if: github.event_name == 'push' || inputs.publish_docs == true
+        uses: actions/download-artifact@v4
+        with:
+          name: hackage-docs
+          path: artifacts/docs
+
+      - name: Publish source package to Hackage
+        if: github.event_name == 'push' || inputs.publish_to_hackage == true
+        env:
+          HACKAGE_KEY: ${{ secrets.HACKAGE_KEY }}
+        run: |
+          CANDIDATE_FLAG=""
+          if [ "${{ inputs.as_candidate }}" = "true" ]; then
+            CANDIDATE_FLAG="--publish"
+          else
+            CANDIDATE_FLAG="--publish"
+          fi
+          for tarball in artifacts/*.tar.gz; do
+            echo "Uploading $tarball to Hackage..."
+            cabal upload $CANDIDATE_FLAG -u "${{ secrets.HACKAGE_USERNAME }}" -p "$HACKAGE_KEY" "$tarball"
+          done
+
+      - name: Publish documentation to Hackage
+        if: github.event_name == 'push' || inputs.publish_docs == true
+        env:
+          HACKAGE_KEY: ${{ secrets.HACKAGE_KEY }}
+        run: |
+          for doc_tarball in artifacts/docs/*-docs.tar.gz; do
+            echo "Uploading doc $doc_tarball to Hackage..."
+            cabal upload -d --publish -u "${{ secrets.HACKAGE_USERNAME }}" -p "$HACKAGE_KEY" "$doc_tarball"
+          done

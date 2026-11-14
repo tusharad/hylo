@@ -1,0 +1,69 @@
+cabal-version: 2.2
+
+-- This file has been generated from package.yaml by hpack version 0.39.6.
+--
+-- see: https://github.com/sol/hpack
+
+name:           hylo
+version:        0.1.0.0
+synopsis:       Type-safe Haskell ORM using recursion schemes
+description:    Please see the README on GitHub at <https://github.com/tusharad/hylo#readme>
+category:       Database
+homepage:       https://github.com/tusharad/hylo#readme
+bug-reports:    https://github.com/tusharad/hylo/issues
+author:         Tushar Adhatrao
+maintainer:     tusharadhatrao@gmail.com
+copyright:      2026 Tushar Adhatrao
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+extra-doc-files:
+    README.md
+    CHANGELOG.md
+
+source-repository head
+  type: git
+  location: https://github.com/tusharad/hylo
+
+library
+  exposed-modules:
+      Lib
+  other-modules:
+      Paths_hylo
+  autogen-modules:
+      Paths_hylo
+  hs-source-dirs:
+      src
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      base >=4.7 && <5
+  default-language: Haskell2010
+
+executable hylo-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_hylo
+  autogen-modules:
+      Paths_hylo
+  hs-source-dirs:
+      app
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , hylo
+  default-language: Haskell2010
+
+test-suite hylo-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_hylo
+  autogen-modules:
+      Paths_hylo
+  hs-source-dirs:
+      test
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , hylo
+  default-language: Haskell2010
