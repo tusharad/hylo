@@ -259,8 +259,7 @@ renderHybridSearchSQL act =
 -- | Single-query Reciprocal Rank Fusion (RRF) combining BM25 full-text and vector search.
 hybridSearchRRF ::
   forall model dim table db.
-  ( KnownNat dim
-  , SupportsHybridSearch db
+  ( SupportsHybridSearch db
   , Table table
   ) =>
   (table 'Expr -> QExpr Text) ->
@@ -276,8 +275,7 @@ hybridSearchRRF = hybridSearchRRFWith defaultHybridSearchConfig
 -- | Generalized hybrid search combinator accepting custom 'HybridSearchConfig'.
 hybridSearchRRFWith ::
   forall model dim table db.
-  ( KnownNat dim
-  , SupportsHybridSearch db
+  ( SupportsHybridSearch db
   , Table table
   ) =>
   HybridSearchConfig ->
@@ -290,31 +288,30 @@ hybridSearchRRFWith ::
   TableSchema table ->
   Query db (HybridSearchResult table model dim)
 hybridSearchRRFWith cfg textSel queryText embSel queryEmb k limitCount schema =
-  hybridSearchDict (Proxy @db)
-    `seq` natVal (Proxy @dim)
-    `seq` let tName = tableName schema
-              tExpr = toTableExpr tName (tableMeta schema)
-              textCol = extractColName (textSel tExpr)
-              embCol = extractColName (embSel tExpr)
-              act =
-                HybridSearchAction
-                  { hsaSchema = schema
-                  , hsaTextColumn = textCol
-                  , hsaTextQuery = queryText
-                  , hsaEmbColumn = embCol
-                  , hsaEmbQuery = queryEmb
-                  , hsaK = k
-                  , hsaLimit = limitCount
-                  , hsaConfig = cfg
-                  }
-              renderedSql = renderHybridSearchSQL act
-              res =
-                HybridSearchResult
-                  { searchRecord = tExpr
-                  , searchLexRank = ColExpr "lexical_search" "lex_rank"
-                  , searchVecRank = ColExpr "vector_search" "vec_rank"
-                  , searchRRFScore = ColExpr "" "rrf_score"
-                  }
-           in Query $ \s ->
-                let s' = s {qsCustomQuery = Just renderedSql}
-                 in (res, s')
+  let tName = tableName schema
+      tExpr = toTableExpr tName (tableMeta schema)
+      textCol = extractColName (textSel tExpr)
+      embCol = extractColName (embSel tExpr)
+      act =
+        HybridSearchAction
+          { hsaSchema = schema
+          , hsaTextColumn = textCol
+          , hsaTextQuery = queryText
+          , hsaEmbColumn = embCol
+          , hsaEmbQuery = queryEmb
+          , hsaK = k
+          , hsaLimit = limitCount
+          , hsaConfig = cfg
+          }
+      renderedSql = renderHybridSearchSQL act
+      res =
+        HybridSearchResult
+          { searchRecord = tExpr
+          , searchLexRank = ColExpr "lexical_search" "lex_rank"
+          , searchVecRank = ColExpr "vector_search" "vec_rank"
+          , searchRRFScore = ColExpr "" "rrf_score"
+          }
+   in Query $ \s ->
+        hybridSearchDict (Proxy @db) `seq`
+          let s' = s {qsCustomQuery = Just renderedSql}
+           in (res, s')
