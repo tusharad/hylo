@@ -134,9 +134,10 @@ forShareOf tables wait = setLock ForShare wait tables
 forKeyShareOf :: [Text] -> LockWait -> Query db ()
 forKeyShareOf tables wait = setLock ForKeyShare wait tables
 
--- | PostgreSQL Lock Compatibility Matrix.
--- Returns 'True' if transactions holding lock mode @l1@ and @l2@ can concurrently
--- hold locks on the same row.
+{- | PostgreSQL Lock Compatibility Matrix.
+Returns 'True' if transactions holding lock mode @l1@ and @l2@ can concurrently
+hold locks on the same row.
+-}
 canConcurrentlyLock :: LockStrength -> LockStrength -> Bool
 canConcurrentlyLock ForUpdate _ = False
 canConcurrentlyLock _ ForUpdate = False
@@ -150,8 +151,9 @@ canConcurrentlyLock ForShare ForKeyShare = True
 canConcurrentlyLock ForKeyShare ForShare = True
 canConcurrentlyLock ForKeyShare ForKeyShare = True
 
--- | Statically guarded transactional query execution with row locking.
--- Fails with [Hylo Error E005] in ReadOnly mode.
+{- | Statically guarded transactional query execution with row locking.
+Fails with [Hylo Error E005] in ReadOnly mode.
+-}
 executeLocked ::
   forall a db (mode :: TxMode).
   (AssertWritable mode) =>

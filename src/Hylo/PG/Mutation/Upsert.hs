@@ -231,5 +231,5 @@ upsert ::
   (table 'Expr -> table 'Expr -> [Assignment]) ->
   Tx db mode (Query db (UpsertAction table))
 upsert schema row target updateFn =
-  writableDict (Proxy :: Proxy mode)
-    `seq` TxReturn (insertOnConflict schema row target updateFn)
+  writableDict (Proxy :: Proxy mode) `seq`
+    TxReturn (insertOnConflict schema row target updateFn)
