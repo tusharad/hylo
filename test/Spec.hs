@@ -7,9 +7,11 @@ Maintainer  : tusharadhatrao@gmail.com
 -}
 module Main (main) where
 
+import qualified Hylo.Core.CodecSpec as CodecSpec
 import qualified Hylo.Core.TableSpec as TableSpec
 import Test.Hspec
 
 main :: IO ()
 main = hspec $ do
   TableSpec.spec
+  CodecSpec.spec
