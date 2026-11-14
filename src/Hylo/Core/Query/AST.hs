@@ -81,8 +81,8 @@ instance NFData FromItem where
 renderExpr :: QExpr a -> Text
 renderExpr = \case
   LitExpr t -> case T.toLower t of
-    "true" -> "true"
-    "false" -> "false"
+    "true" -> "TRUE"
+    "false" -> "FALSE"
     _ -> t
   ColExpr rel col -> "\"" <> rel <> "\".\"" <> col <> "\""
   BinOpExpr op l r -> "(" <> renderExpr l <> " " <> op <> " " <> renderExpr r <> ")"
@@ -92,6 +92,16 @@ renderExpr = \case
       else "(" <> op <> " " <> renderExpr e <> ")"
   LiftNullableExpr e -> renderExpr e
   CoalesceExpr m dflt -> "COALESCE(" <> renderExpr m <> ", " <> renderExpr dflt <> ")"
+  AggOpExpr fn arg mFilter ->
+    let base = fn <> "(" <> renderExpr arg <> ")"
+     in case mFilter of
+          Nothing -> base
+          Just cond -> base <> " FILTER (WHERE " <> renderExpr cond <> ")"
+  StringAggExpr arg delim mFilter ->
+    let base = "string_agg(" <> renderExpr arg <> ", " <> renderExpr delim <> ")"
+     in case mFilter of
+          Nothing -> base
+          Just cond -> base <> " FILTER (WHERE " <> renderExpr cond <> ")"
 
 -- | Extract all table relation aliases referenced in a QExpr expression.
 exprAliases :: QExpr a -> [Text]
@@ -102,6 +112,8 @@ exprAliases = \case
   UnaryOpExpr _ e -> exprAliases e
   LiftNullableExpr e -> exprAliases e
   CoalesceExpr m dflt -> exprAliases m ++ exprAliases dflt
+  AggOpExpr _ arg mFilter -> exprAliases arg ++ maybe [] exprAliases mFilter
+  StringAggExpr arg delim mFilter -> exprAliases arg ++ exprAliases delim ++ maybe [] exprAliases mFilter
 
 -- | Class of types that can be projected into SQL SELECT column lists.
 class Projectable a where

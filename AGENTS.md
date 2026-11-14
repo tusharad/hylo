@@ -160,6 +160,21 @@ All agents and contributors working on this codebase MUST follow this branching 
    Capability marker classes with no methods (e.g. `class SupportsLateralSubqueries db`) trigger `[-Wredundant-constraints]` when used in function signatures.
    * **Rule:** Include a `Proxy` dictionary method (`lateralSubqueriesDict :: Proxy db -> ()`) and evaluate it with `seq` in the guarded combinator (`many`), ensuring the capability constraint is genuinely enforced and eliminating compiler warnings.
 
+19. **Record Update Syntax for Extensible State Structures (`QueryState`):**
+   When updating state structures like `QueryState` with new fields (e.g. `qsGroupBy`, `qsHaving`), never construct `QueryState` using positional syntax (`QueryState s l r p lat`). Positional construction causes downstream compiler breaks whenever fields are added or rearranged.
+   * **Rule:** Always use record update syntax based on baseline default state:
+     ```haskell
+     -- CORRECT
+     let childInit = initialQueryState { qsNextScope = qsNextScope s, qsNextLateral = qsNextLateral s }
+     ```
+
+20. **Static Detection of Ungrouped Columns in Aggregations (`E004`):**
+   In aggregate query blocks (`aggregate $ do { groupBy u.orgId; pure (...) }`), tracking group keys at the phantom type level (`AggQuery key a`) and validating projected elements with a multi-parameter type class (`ValidAggProjection key a`) allows static detection of ungrouped scalar column selections (`CheckGrouped` / `AssertGrouped` emitting `[Hylo Error E004]`), while allowing any aggregate expression (`AggExpr a`) or composite tuple combinations to pass without ambiguous type variables.
+
+21. **Numeric Literal Formatting in SQL Assertions:**
+   `Double` literals format via `show` as `"1000.0"`, whereas integer types (`Int64`) format as `"1000"`. When writing tests that assert exact SQL text matching (e.g., `HAVING (SUM(...) > 1000)`), ensure test column types and literal types align with expected test SQL assertions by using `Int64`.
+
+
 
 
 

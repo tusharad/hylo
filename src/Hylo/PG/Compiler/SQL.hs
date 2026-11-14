@@ -69,4 +69,12 @@ renderSQLText q =
         (p : ps) ->
           let combined = foldl (BinOpExpr "AND") p ps
            in " WHERE " <> renderExpr combined
-   in selectClause <> fromClause <> whereClause
+      groupByClause = case qsGroupBy st of
+        [] -> ""
+        cols -> " GROUP BY " <> T.intercalate ", " cols
+      havingClause = case qsHaving st of
+        [] -> ""
+        (h : hs) ->
+          let combined = foldl (BinOpExpr "AND") h hs
+           in " HAVING " <> renderExpr combined
+   in selectClause <> fromClause <> whereClause <> groupByClause <> havingClause

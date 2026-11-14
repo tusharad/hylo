@@ -35,6 +35,7 @@ library
       Hylo.Core.Key
       Hylo.Core.Nullable
       Hylo.Core.Query
+      Hylo.Core.Query.Aggregate
       Hylo.Core.Query.AST
       Hylo.Core.Query.Monad
       Hylo.Core.Schema
@@ -42,6 +43,7 @@ library
       Hylo.Core.TypeError
       Hylo.PG
       Hylo.PG.Codec.Binary
+      Hylo.PG.Compiler.Aggregate
       Hylo.PG.Compiler.JoinFlattener
       Hylo.PG.Compiler.Lateral
       Hylo.PG.Compiler.SQL
@@ -81,10 +83,12 @@ test-suite hylo-test
       Hylo.Core.CodecSpec
       Hylo.Core.TableSpec
       Hylo.Core.TypeErrorSpec
+      Hylo.PG.Compiler.AggregateSpec
       Hylo.PG.Compiler.JoinFlattenerSpec
       Hylo.PG.Compiler.LateralSpec
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TypeErrorSpec
+      Test.Hylo.PG.Compiler.AggregateSpec
       Test.Hylo.PG.Compiler.JoinFlattenerSpec
       Test.Hylo.PG.Compiler.LateralSpec
       Test.ShouldNotTypecheck

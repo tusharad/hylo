@@ -34,6 +34,9 @@ module Hylo.Core.Query
   , renderExpr
   , exprAliases
 
+    -- * Aggregation & Grouping
+  , module Hylo.Core.Query.Aggregate
+
     -- * Transaction Monad & Modes
   , TxMode (..)
   , Tx (..)
@@ -63,6 +66,7 @@ import Hylo.Core.Query.AST
   , formatScope
   , renderExpr
   )
+import Hylo.Core.Query.Aggregate
 import Hylo.Core.Query.Monad
   ( Query (..)
   , QueryState (..)
