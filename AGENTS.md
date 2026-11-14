@@ -107,3 +107,7 @@ All agents and contributors working on this codebase MUST follow this branching 
    When writing algebraic tests verifying the Functor identity and composition laws (`fmap id == id` and `fmap (f . g) == fmap f . fmap g`), HLint flags them as redundant simplifications.
    * **Rule:** Add `{-# HLINT ignore "Functor law" #-}` to the specific test module so full algebraic verification is retained without breaking lint gates.
 
+4. **CI Fourmolu Scope & Root Haskell Files (`Setup.hs`):**
+   `run-fourmolu` in GitHub Actions and local `make format-check` must cover all tracked Haskell files, including root `Setup.hs` and example files.
+   * **Rule:** Always format `Setup.hs` alongside `src/`, `app/`, and `test/` using `make format`. Do not leave root or script Haskell files unformatted.
+
