@@ -24,6 +24,7 @@ module Hylo.PG
   , module Hylo.PG.Pool.Routing
   , module Hylo.PG.Mutation.Bulk
   , module Hylo.PG.Error.Translation
+  , module Hylo.PG.Vector
   ) where
 
 import Hylo.PG.Codec.Binary
@@ -44,3 +45,4 @@ import Hylo.PG.Streaming.Cursor
 import Hylo.PG.Transaction.Hooks
 import Hylo.PG.Transaction.Retry
 import Hylo.PG.Transaction.Savepoint
+import Hylo.PG.Vector
