@@ -145,3 +145,63 @@ instance
       ++ projectColumns c
       ++ projectColumns d
       ++ projectColumns e
+
+instance
+  ( Projectable a
+  , Projectable b
+  , Projectable c
+  , Projectable d
+  , Projectable e
+  , Projectable f
+  ) =>
+  Projectable (a, b, c, d, e, f)
+  where
+  projectColumns (a, b, c, d, e, f) =
+    projectColumns a
+      ++ projectColumns b
+      ++ projectColumns c
+      ++ projectColumns d
+      ++ projectColumns e
+      ++ projectColumns f
+
+instance
+  ( Projectable a
+  , Projectable b
+  , Projectable c
+  , Projectable d
+  , Projectable e
+  , Projectable f
+  , Projectable g
+  ) =>
+  Projectable (a, b, c, d, e, f, g)
+  where
+  projectColumns (a, b, c, d, e, f, g) =
+    projectColumns a
+      ++ projectColumns b
+      ++ projectColumns c
+      ++ projectColumns d
+      ++ projectColumns e
+      ++ projectColumns f
+      ++ projectColumns g
+
+instance
+  ( Projectable a
+  , Projectable b
+  , Projectable c
+  , Projectable d
+  , Projectable e
+  , Projectable f
+  , Projectable g
+  , Projectable h
+  ) =>
+  Projectable (a, b, c, d, e, f, g, h)
+  where
+  projectColumns (a, b, c, d, e, f, g, h) =
+    projectColumns a
+      ++ projectColumns b
+      ++ projectColumns c
+      ++ projectColumns d
+      ++ projectColumns e
+      ++ projectColumns f
+      ++ projectColumns g
+      ++ projectColumns h

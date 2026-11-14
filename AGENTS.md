@@ -174,6 +174,16 @@ All agents and contributors working on this codebase MUST follow this branching 
 21. **Numeric Literal Formatting in SQL Assertions:**
    `Double` literals format via `show` as `"1000.0"`, whereas integer types (`Int64`) format as `"1000"`. When writing tests that assert exact SQL text matching (e.g., `HAVING (SUM(...) > 1000)`), ensure test column types and literal types align with expected test SQL assertions by using `Int64`.
 
+22. **Window Function Safety & PostgreSQL Error 42P20 Elimination:**
+   PostgreSQL error `42P20` (`window functions are not allowed in WHERE`) is eradicated statically at compile time. `over` constructs a distinct `WindowExpr a` type rather than a standard `QExpr a`. Because `where_` requires `QExpr Bool` and `WindowExpr` does not implement `ToQExpr` or standard boolean comparison operators (`==.`, `>.`, etc.), any attempt to filter by a window function directly inside `where_` fails GHC type checking at compile time.
+
+23. **Capability Class Co-location & Orphan Prevention (`GHC-90177`):**
+   Backend capability marker classes (such as `SupportsWindowFunctions db`) should be defined in the same dialect module as their primary instance (`instance SupportsWindowFunctions Postgres` in `Hylo.PG.Compiler.Window`), rather than the core agnostic query module. This prevents orphan instance warnings (`[-Worphans]`) under `-Wall -Werror`.
+
+24. **Broad `Projectable` Tupling & Analytical Projections:**
+   Analytical window queries often project wide result tuples (e.g., entity primary keys plus multiple ranked, lagged, and framed window expressions). Provide `Projectable` tuple instances up to 8-tuples (`(a, b, c, d, e, f, g, h)`) in `Hylo.Core.Query.AST` so that complex multi-window select projections compile seamlessly without requiring nested pairs or intermediate records.
+
+
 
 
 
