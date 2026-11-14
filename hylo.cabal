@@ -28,6 +28,9 @@ source-repository head
 library
   exposed-modules:
       Hylo
+      Hylo.AI.Policy.RLS
+      Hylo.AI.QueryTool
+      Hylo.AI.Schema.JSON
       Hylo.Core
       Hylo.Core.Codec
       Hylo.Core.Context
@@ -77,10 +80,14 @@ library
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
-      base >=4.7 && <5
+      aeson >=2.0 && <3
+    , aeson-qq >=0.8 && <1
+    , base >=4.7 && <5
     , bytestring >=0.10 && <0.13
     , deepseq >=1.4 && <2
+    , scientific ==0.3.*
     , stm >=2.5 && <3
+    , template-haskell >=2.16 && <3
     , text >=1.2 && <3
     , time >=1.9 && <2
     , vector >=0.12 && <0.14
@@ -94,11 +101,15 @@ executable hylo-exe
       app
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      aeson >=2.0 && <3
+    , aeson-qq >=0.8 && <1
+    , base >=4.7 && <5
     , bytestring >=0.10 && <0.13
     , deepseq >=1.4 && <2
     , hylo
+    , scientific ==0.3.*
     , stm >=2.5 && <3
+    , template-haskell >=2.16 && <3
     , text >=1.2 && <3
     , time >=1.9 && <2
     , vector >=0.12 && <0.14
@@ -108,6 +119,7 @@ test-suite hylo-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Hylo.AI.QueryToolSpec
       Hylo.Core.CodecSpec
       Hylo.Core.TableSpec
       Hylo.Core.TransactionSpec
@@ -123,6 +135,7 @@ test-suite hylo-test
       Hylo.PG.Streaming.CursorSpec
       Hylo.PG.Transaction.RetrySpec
       Hylo.PG.VectorSpec
+      Test.Hylo.AI.QueryToolSpec
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TransactionSpec
       Test.Hylo.Core.TypeErrorSpec
@@ -144,13 +157,17 @@ test-suite hylo-test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       QuickCheck >=2.14
+    , aeson >=2.0 && <3
+    , aeson-qq >=0.8 && <1
     , base >=4.7 && <5
     , bytestring >=0.10 && <0.13
     , deepseq >=1.4
     , hspec >=2.11
     , hylo
+    , scientific ==0.3.*
     , should-not-typecheck >=2.1
     , stm >=2.5 && <3
+    , template-haskell >=2.16 && <3
     , text >=1.2 && <3
     , time >=1.9 && <2
     , vector >=0.12 && <0.14

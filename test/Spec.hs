@@ -7,6 +7,7 @@ Maintainer  : tusharadhatrao@gmail.com
 -}
 module Main (main) where
 
+import qualified Hylo.AI.QueryToolSpec as QueryToolSpec
 import qualified Hylo.Core.CodecSpec as CodecSpec
 import qualified Hylo.Core.TableSpec as TableSpec
 import qualified Hylo.Core.TransactionSpec as TransactionSpec
@@ -41,3 +42,4 @@ main = hspec $ do
   BulkSpec.spec
   VectorSpec.spec
   HybridSpec.spec
+  QueryToolSpec.spec

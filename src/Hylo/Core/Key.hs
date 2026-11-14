@@ -23,7 +23,10 @@ This guarantees at compile time that keys from different tables
 (e.g. @Id UserT Int64@ and @Id OrgT Int64@) cannot be compared or mixed up.
 -}
 newtype Id table a = Id {unId :: a}
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+
+instance Show a => Show (Id table a) where
+  showsPrec p (Id a) = showsPrec p a
 
 instance NFData a => NFData (Id table a) where
   rnf (Id a) = rnf a
