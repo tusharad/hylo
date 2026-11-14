@@ -35,11 +35,15 @@ library
       Hylo.Core.Key
       Hylo.Core.Nullable
       Hylo.Core.Query
+      Hylo.Core.Query.AST
+      Hylo.Core.Query.Monad
       Hylo.Core.Schema
       Hylo.Core.Table
       Hylo.Core.TypeError
       Hylo.PG
       Hylo.PG.Codec.Binary
+      Hylo.PG.Compiler.JoinFlattener
+      Hylo.PG.Compiler.SQL
       Lib
   other-modules:
       Paths_hylo
@@ -75,8 +79,10 @@ test-suite hylo-test
       Hylo.Core.CodecSpec
       Hylo.Core.TableSpec
       Hylo.Core.TypeErrorSpec
+      Hylo.PG.Compiler.JoinFlattenerSpec
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TypeErrorSpec
+      Test.Hylo.PG.Compiler.JoinFlattenerSpec
       Test.ShouldNotTypecheck
       Paths_hylo
   hs-source-dirs:

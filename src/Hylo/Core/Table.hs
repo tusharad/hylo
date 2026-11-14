@@ -12,6 +12,8 @@ Maintainer  : tusharadhatrao@gmail.com
 module Hylo.Core.Table
   ( TableSchema (..)
   , tableSchema
+  , Table (..)
+  , colSpecExpr
   , column
   , nullableColumn
   , primaryKey
@@ -22,6 +24,15 @@ module Hylo.Core.Table
 import Data.Kind (Type)
 import Data.Text (Text)
 import Hylo.Core.Context (ColSpec (..), Ctx (..))
+import Hylo.Core.Expr (QExpr, colExpr)
+
+-- | Class for HKD table schemas that can project their fields into 'Expr context.
+class Table (table :: Ctx -> Type) where
+  toTableExpr :: Text -> table 'Meta -> table 'Expr
+
+-- | Construct a typed SQL column expression for an alias and a column specification.
+colSpecExpr :: Text -> ColSpec a -> QExpr a
+colSpecExpr alias spec = colExpr alias (colName spec)
 
 -- | Schema definition for an HKD table pairing the table name with its 'Meta record.
 data TableSchema (table :: Ctx -> Type) = TableSchema

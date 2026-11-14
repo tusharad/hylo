@@ -18,6 +18,22 @@ module Hylo.Core.Query
   ( -- * Backend Markers
     Postgres
 
+    -- * Operational Query Monad & AST
+  , Query (..)
+  , QueryState (..)
+  , initialQueryState
+  , each
+  , eachWith
+  , where_
+  , ScopeId (..)
+  , formatScope
+  , generateScopes
+  , RelationBinding (..)
+  , FromItem (..)
+  , Projectable (..)
+  , renderExpr
+  , exprAliases
+
     -- * Transaction Monad & Modes
   , TxMode (..)
   , Tx (..)
@@ -38,8 +54,27 @@ import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Key (Id)
+import Hylo.Core.Query.AST
+  ( FromItem (..)
+  , Projectable (..)
+  , RelationBinding (..)
+  , ScopeId (..)
+  , exprAliases
+  , formatScope
+  , renderExpr
+  )
+import Hylo.Core.Query.Monad
+  ( Query (..)
+  , QueryState (..)
+  , each
+  , eachWith
+  , initialQueryState
+  , runQuery
+  , where_
+  )
 import Hylo.Core.Table (TableSchema)
 import Hylo.Core.TypeError (AssertWritable (..), TxMode (..))
+import Hylo.PG.Compiler.JoinFlattener (generateScopes)
 
 -- | Phantom type identifying the PostgreSQL database engine.
 data Postgres
