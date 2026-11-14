@@ -16,6 +16,7 @@ module Hylo.PG
   , module Hylo.PG.Hydration.Graph
   , module Hylo.PG.Mutation.Locking
   , module Hylo.PG.Mutation.Upsert
+  , module Hylo.PG.Streaming.Cursor
   ) where
 
 import Hylo.PG.Codec.Binary
@@ -28,3 +29,4 @@ import Hylo.PG.Compiler.Window
 import Hylo.PG.Hydration.Graph
 import Hylo.PG.Mutation.Locking
 import Hylo.PG.Mutation.Upsert
+import Hylo.PG.Streaming.Cursor

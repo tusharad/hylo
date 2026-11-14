@@ -53,6 +53,9 @@ module Hylo.Core.Query
   , module Hylo.Core.Query.CTE
   , module Hylo.Core.Query.Recursive
 
+    -- * Keyset Pagination
+  , module Hylo.Core.Query.Pagination
+
     -- * Transaction Monad & Modes
   , TxMode (..)
   , Tx (..)
@@ -100,6 +103,7 @@ import Hylo.Core.Query.Monad
   , runQuery
   , where_
   )
+import Hylo.Core.Query.Pagination
 import Hylo.Core.Query.Recursive
 import Hylo.Core.Query.Window
 import Hylo.Core.Table (TableSchema)
@@ -114,6 +118,15 @@ data Tx db (mode :: TxMode) a
   = TxReturn a
   | TxEmpty
   deriving (Eq, Show, Functor)
+
+instance Applicative (Tx db mode) where
+  pure = TxReturn
+  TxReturn f <*> TxReturn a = TxReturn (f a)
+  _ <*> _ = TxEmpty
+
+instance Monad (Tx db mode) where
+  TxReturn a >>= f = f a
+  TxEmpty >>= _ = TxEmpty
 
 instance NFData a => NFData (Tx db mode a) where
   rnf (TxReturn a) = rnf a
