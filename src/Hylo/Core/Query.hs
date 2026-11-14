@@ -37,6 +37,9 @@ module Hylo.Core.Query
     -- * Aggregation & Grouping
   , module Hylo.Core.Query.Aggregate
 
+    -- * Window Functions & Framing
+  , module Hylo.Core.Query.Window
+
     -- * Transaction Monad & Modes
   , TxMode (..)
   , Tx (..)
@@ -76,6 +79,7 @@ import Hylo.Core.Query.Monad
   , runQuery
   , where_
   )
+import Hylo.Core.Query.Window
 import Hylo.Core.Table (TableSchema)
 import Hylo.Core.TypeError (AssertWritable (..), TxMode (..))
 import Hylo.PG.Compiler.JoinFlattener (generateScopes)

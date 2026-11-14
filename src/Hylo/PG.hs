@@ -11,6 +11,7 @@ module Hylo.PG
   , module Hylo.PG.Compiler.JoinFlattener
   , module Hylo.PG.Compiler.Lateral
   , module Hylo.PG.Compiler.SQL
+  , module Hylo.PG.Compiler.Window
   , module Hylo.PG.Hydration.Graph
   ) where
 
@@ -19,4 +20,5 @@ import Hylo.PG.Compiler.Aggregate
 import Hylo.PG.Compiler.JoinFlattener
 import Hylo.PG.Compiler.Lateral
 import Hylo.PG.Compiler.SQL
+import Hylo.PG.Compiler.Window
 import Hylo.PG.Hydration.Graph

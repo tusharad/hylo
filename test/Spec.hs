@@ -13,6 +13,7 @@ import qualified Hylo.Core.TypeErrorSpec as TypeErrorSpec
 import qualified Hylo.PG.Compiler.AggregateSpec as AggregateSpec
 import qualified Hylo.PG.Compiler.JoinFlattenerSpec as JoinFlattenerSpec
 import qualified Hylo.PG.Compiler.LateralSpec as LateralSpec
+import qualified Hylo.PG.Compiler.WindowSpec as WindowSpec
 import Test.Hspec
 
 main :: IO ()
@@ -23,3 +24,4 @@ main = hspec $ do
   JoinFlattenerSpec.spec
   LateralSpec.spec
   AggregateSpec.spec
+  WindowSpec.spec

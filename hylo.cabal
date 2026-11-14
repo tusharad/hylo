@@ -38,6 +38,7 @@ library
       Hylo.Core.Query.Aggregate
       Hylo.Core.Query.AST
       Hylo.Core.Query.Monad
+      Hylo.Core.Query.Window
       Hylo.Core.Schema
       Hylo.Core.Table
       Hylo.Core.TypeError
@@ -47,6 +48,7 @@ library
       Hylo.PG.Compiler.JoinFlattener
       Hylo.PG.Compiler.Lateral
       Hylo.PG.Compiler.SQL
+      Hylo.PG.Compiler.Window
       Hylo.PG.Hydration.Graph
       Lib
   other-modules:
@@ -86,11 +88,13 @@ test-suite hylo-test
       Hylo.PG.Compiler.AggregateSpec
       Hylo.PG.Compiler.JoinFlattenerSpec
       Hylo.PG.Compiler.LateralSpec
+      Hylo.PG.Compiler.WindowSpec
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TypeErrorSpec
       Test.Hylo.PG.Compiler.AggregateSpec
       Test.Hylo.PG.Compiler.JoinFlattenerSpec
       Test.Hylo.PG.Compiler.LateralSpec
+      Test.Hylo.PG.Compiler.WindowSpec
       Test.ShouldNotTypecheck
       Paths_hylo
   hs-source-dirs:
