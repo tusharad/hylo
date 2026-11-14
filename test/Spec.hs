@@ -18,6 +18,7 @@ import qualified Hylo.PG.Compiler.LateralSpec as LateralSpec
 import qualified Hylo.PG.Compiler.WindowSpec as WindowSpec
 import qualified Hylo.PG.Mutation.BulkSpec as BulkSpec
 import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
+import qualified Hylo.PG.Search.HybridSpec as HybridSpec
 import qualified Hylo.PG.Streaming.CursorSpec as CursorSpec
 import qualified Hylo.PG.Transaction.RetrySpec as RetrySpec
 import qualified Hylo.PG.VectorSpec as VectorSpec
@@ -39,3 +40,4 @@ main = hspec $ do
   RetrySpec.spec
   BulkSpec.spec
   VectorSpec.spec
+  HybridSpec.spec

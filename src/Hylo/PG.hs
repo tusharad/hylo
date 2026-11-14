@@ -25,6 +25,8 @@ module Hylo.PG
   , module Hylo.PG.Mutation.Bulk
   , module Hylo.PG.Error.Translation
   , module Hylo.PG.Vector
+  , module Hylo.PG.Search.Hybrid
+  , module Hylo.PG.Search.RRF
   ) where
 
 import Hylo.PG.Codec.Binary
@@ -41,6 +43,8 @@ import Hylo.PG.Mutation.Bulk
 import Hylo.PG.Mutation.Locking
 import Hylo.PG.Mutation.Upsert
 import Hylo.PG.Pool.Routing
+import Hylo.PG.Search.Hybrid
+import Hylo.PG.Search.RRF
 import Hylo.PG.Streaming.Cursor
 import Hylo.PG.Transaction.Hooks
 import Hylo.PG.Transaction.Retry

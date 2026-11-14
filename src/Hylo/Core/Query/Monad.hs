@@ -54,17 +54,18 @@ data QueryState = QueryState
   , qsOffset :: !(Maybe Int)
   , qsLock :: !(Maybe LockClause)
   , qsUpsert :: !(Maybe Text)
+  , qsCustomQuery :: !(Maybe Text)
   }
   deriving (Eq, Show)
 
 instance NFData QueryState where
-  rnf (QueryState n l r p lat gb hv ob ctes lim off lk up) =
+  rnf (QueryState n l r p lat gb hv ob ctes lim off lk up cq) =
     rnf (n, l, r, p, lat, gb, hv) `seq`
-      rnf (ob, ctes, lim, off, lk, up)
+      rnf (ob, ctes, lim, off, lk, up, cq)
 
 -- | Default initial state for a new Query computation.
 initialQueryState :: QueryState
-initialQueryState = QueryState 0 0 [] [] [] [] [] [] [] Nothing Nothing Nothing Nothing
+initialQueryState = QueryState 0 0 [] [] [] [] [] [] [] Nothing Nothing Nothing Nothing Nothing
 
 -- | Pure operational Query monad parameterised by database backend marker.
 newtype Query db a = Query

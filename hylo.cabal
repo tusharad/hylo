@@ -63,6 +63,8 @@ library
       Hylo.PG.Mutation.Locking
       Hylo.PG.Mutation.Upsert
       Hylo.PG.Pool.Routing
+      Hylo.PG.Search.Hybrid
+      Hylo.PG.Search.RRF
       Hylo.PG.Streaming.Cursor
       Hylo.PG.Transaction.Hooks
       Hylo.PG.Transaction.Retry
@@ -117,6 +119,7 @@ test-suite hylo-test
       Hylo.PG.Compiler.WindowSpec
       Hylo.PG.Mutation.BulkSpec
       Hylo.PG.Mutation.UpsertSpec
+      Hylo.PG.Search.HybridSpec
       Hylo.PG.Streaming.CursorSpec
       Hylo.PG.Transaction.RetrySpec
       Hylo.PG.VectorSpec
@@ -130,6 +133,7 @@ test-suite hylo-test
       Test.Hylo.PG.Compiler.WindowSpec
       Test.Hylo.PG.Mutation.BulkSpec
       Test.Hylo.PG.Mutation.UpsertSpec
+      Test.Hylo.PG.Search.HybridSpec
       Test.Hylo.PG.Streaming.CursorSpec
       Test.Hylo.PG.Transaction.RetrySpec
       Test.Hylo.PG.VectorSpec

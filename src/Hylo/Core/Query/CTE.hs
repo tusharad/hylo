@@ -317,46 +317,52 @@ mkCTERef name =
 -- | Render inner SQL string for CTE definitions.
 renderQueryInner :: Projectable a => a -> QueryState -> Text
 renderQueryInner res st =
-  let projections = projectColumns res
-      selectClause =
-        "SELECT "
-          <> (if null projections then "1" else T.intercalate ", " projections)
-      (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
-      mFromWithLaterals = case mFrom of
-        Nothing -> case qsLaterals st of
-          [] -> Nothing
-          (l : ls) ->
-            Just $
-              foldl
-                (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-                (FromTable (lbAlias l) (lbAlias l))
-                ls
-        Just baseItem ->
-          Just $
-            foldl
-              (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-              baseItem
-              (qsLaterals st)
-      fromClause = case mFromWithLaterals of
-        Nothing -> ""
-        Just item -> " FROM " <> renderFromItem item
-      whereClause = case wherePreds of
-        [] -> ""
-        (p : ps) ->
-          let combined = foldl (BinOpExpr "AND") p ps
-           in " WHERE " <> renderExpr combined
-      groupByClause = case qsGroupBy st of
-        [] -> ""
-        cols -> " GROUP BY " <> T.intercalate ", " cols
-      havingClause = case qsHaving st of
-        [] -> ""
-        (h : hs) ->
-          let combined = foldl (BinOpExpr "AND") h hs
-           in " HAVING " <> renderExpr combined
-      orderByClause = case qsOrderBy st of
-        [] -> ""
-        orders -> " ORDER BY " <> T.intercalate ", " orders
-   in selectClause <> fromClause <> whereClause <> groupByClause <> havingClause <> orderByClause
+  case qsUpsert st of
+    Just upsertSql -> upsertSql
+    Nothing ->
+      case qsCustomQuery st of
+        Just customSql -> customSql
+        Nothing ->
+          let projections = projectColumns res
+              selectClause =
+                "SELECT "
+                  <> (if null projections then "1" else T.intercalate ", " projections)
+              (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
+              mFromWithLaterals = case mFrom of
+                Nothing -> case qsLaterals st of
+                  [] -> Nothing
+                  (l : ls) ->
+                    Just $
+                      foldl
+                        (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+                        (FromTable (lbAlias l) (lbAlias l))
+                        ls
+                Just baseItem ->
+                  Just $
+                    foldl
+                      (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+                      baseItem
+                      (qsLaterals st)
+              fromClause = case mFromWithLaterals of
+                Nothing -> ""
+                Just item -> " FROM " <> renderFromItem item
+              whereClause = case wherePreds of
+                [] -> ""
+                (p : ps) ->
+                  let combined = foldl (BinOpExpr "AND") p ps
+                   in " WHERE " <> renderExpr combined
+              groupByClause = case qsGroupBy st of
+                [] -> ""
+                cols -> " GROUP BY " <> T.intercalate ", " cols
+              havingClause = case qsHaving st of
+                [] -> ""
+                (h : hs) ->
+                  let combined = foldl (BinOpExpr "AND") h hs
+                   in " HAVING " <> renderExpr combined
+              orderByClause = case qsOrderBy st of
+                [] -> ""
+                orders -> " ORDER BY " <> T.intercalate ", " orders
+           in selectClause <> fromClause <> whereClause <> groupByClause <> havingClause <> orderByClause
 
 -- | Define a standard Common Table Expression (CTE) in the 'Query' monad.
 with ::
