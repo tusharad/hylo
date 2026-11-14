@@ -268,6 +268,19 @@ All agents and contributors working on this codebase MUST follow this branching 
    `GHC.TypeNats.natVal` returns `GHC.Natural.Natural`, not `Integer` or `Int`. Attempting to return `natVal` directly from functions typed as `embeddingDim :: Embedding m d -> Integer` fails with a type mismatch error.
    * **Rule:** Explicitly convert `Natural` via `toInteger (natVal proxy)` or `fromIntegral (natVal proxy)` when exposing integer dimensions.
 
+47. **Fourmolu Infix Operator Sequences across Multiline Expressions (` `seq` ` Chaining):**
+   Writing chained infix operators before a `let` block (e.g. `hybridSearchDict (Proxy @db) `seq` natVal (Proxy @dim) `seq` let ...`) triggers different indentation decisions between Fourmolu 0.21 and Fourmolu 0.17 in CI, leading to format check failures.
+   * **Rule:** Avoid placing infix operators like `` `seq` `` in leading positions before `let` bindings. Instead, place dictionary evaluations inside the monadic return block `Query $ \s -> hybridSearchDict (Proxy @db) `seq` (res, s')`, keeping `let ... in` blocks clean and uniformly indented.
+
+48. **Redundant Type Constraints on Phantom Types (`KnownNat`, `KnownSymbol`):**
+   When phantom type parameters (such as `model :: Symbol` and `dim :: Nat` on `Embedding model dim`) are only used to guarantee compile-time type compatibility between a table column `table 'Expr -> QExpr (Embedding model dim)` and an input embedding `Embedding model dim`, adding `KnownSymbol model` or `KnownNat dim` to the combinator's signature is rejected under `-Wall -Werror` / `--pedantic` with `[-Wredundant-constraints]`.
+   * **Rule:** Do not add `KnownSymbol` or `KnownNat` constraints to query combinators unless runtime reflection (`symbolVal`, `natVal`) is actually performed within the function body. Phantom type compatibility between two AST nodes is checked purely at compile time by GHC's unification without typeclass dictionary overhead.
+
+49. **`MonoLocalBinds` Implication by `GADTs` in HLint:**
+   When `{-# LANGUAGE GADTs #-}` is enabled on a module, HLint flags `{-# LANGUAGE MonoLocalBinds #-}` as redundant (`Note: Extension MonoLocalBinds is implied by GADTs`).
+   * **Rule:** Omit `{-# LANGUAGE MonoLocalBinds #-}` when `{-# LANGUAGE GADTs #-}` is already enabled on the module to satisfy HLint.
+
+
 
 
 
