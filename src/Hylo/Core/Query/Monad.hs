@@ -52,15 +52,7 @@ data QueryState = QueryState
 
 instance NFData QueryState where
   rnf (QueryState n l r p lat gb hv ob ctes) =
-    rnf n
-      `seq` rnf l
-      `seq` rnf r
-      `seq` rnf p
-      `seq` rnf lat
-      `seq` rnf gb
-      `seq` rnf hv
-      `seq` rnf ob
-      `seq` rnf ctes
+    rnf (n, l, r, p, lat, gb, hv, ob, ctes)
 
 -- | Default initial state for a new Query computation.
 initialQueryState :: QueryState
