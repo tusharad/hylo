@@ -16,6 +16,7 @@ import qualified Hylo.PG.Compiler.CTESpec as CTESpec
 import qualified Hylo.PG.Compiler.JoinFlattenerSpec as JoinFlattenerSpec
 import qualified Hylo.PG.Compiler.LateralSpec as LateralSpec
 import qualified Hylo.PG.Compiler.WindowSpec as WindowSpec
+import qualified Hylo.PG.Mutation.BulkSpec as BulkSpec
 import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
 import qualified Hylo.PG.Streaming.CursorSpec as CursorSpec
 import qualified Hylo.PG.Transaction.RetrySpec as RetrySpec
@@ -35,3 +36,4 @@ main = hspec $ do
   UpsertSpec.spec
   CursorSpec.spec
   RetrySpec.spec
+  BulkSpec.spec

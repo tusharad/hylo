@@ -31,6 +31,7 @@ library
       Hylo.Core
       Hylo.Core.Codec
       Hylo.Core.Context
+      Hylo.Core.Error
       Hylo.Core.Expr
       Hylo.Core.Key
       Hylo.Core.Nullable
@@ -55,7 +56,9 @@ library
       Hylo.PG.Compiler.SQL
       Hylo.PG.Compiler.Window
       Hylo.PG.Connection
+      Hylo.PG.Error.Translation
       Hylo.PG.Hydration.Graph
+      Hylo.PG.Mutation.Bulk
       Hylo.PG.Mutation.Locking
       Hylo.PG.Mutation.Upsert
       Hylo.PG.Pool.Routing
@@ -108,6 +111,7 @@ test-suite hylo-test
       Hylo.PG.Compiler.JoinFlattenerSpec
       Hylo.PG.Compiler.LateralSpec
       Hylo.PG.Compiler.WindowSpec
+      Hylo.PG.Mutation.BulkSpec
       Hylo.PG.Mutation.UpsertSpec
       Hylo.PG.Streaming.CursorSpec
       Hylo.PG.Transaction.RetrySpec
@@ -119,6 +123,7 @@ test-suite hylo-test
       Test.Hylo.PG.Compiler.JoinFlattenerSpec
       Test.Hylo.PG.Compiler.LateralSpec
       Test.Hylo.PG.Compiler.WindowSpec
+      Test.Hylo.PG.Mutation.BulkSpec
       Test.Hylo.PG.Mutation.UpsertSpec
       Test.Hylo.PG.Streaming.CursorSpec
       Test.Hylo.PG.Transaction.RetrySpec
