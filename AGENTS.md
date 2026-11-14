@@ -81,3 +81,33 @@ All agents and contributors working on this codebase MUST follow this branching 
 1. **Pure invariants**: Add `QuickCheck` property tests for pure query AST transformations, SQL compilation, algebraic laws, and type-level assertions.
 2. **Boundary tests**: Write `HSpec` unit tests for database interactions, execution planning, and error handling.
 3. **Pre-commit**: Install and verify pre-commit hooks (`pre-commit install`) before pushing changes.
+
+---
+
+## Key Lessons Learned & Common GHC Pitfalls
+
+1. **Custom `HasField` Instances & Record Selectors (`GHC-43406`):**
+   Never define named record field selectors on newtypes or wrapper types that implement an overlapping polymorphic `HasField field (Wrapper a) (QExpr ...)` instance (such as `NullableTable`). GHC automatically generates built-in `HasField` instances for record field labels, which triggers `[GHC-43406]: type 'field' could unify with one of the field labels of 'Wrapper'`.
+   * **Rule:** Always define wrapper types using plain positional constructors:
+     ```haskell
+     -- CORRECT
+     newtype NullableTable exprRecord = NullableTable exprRecord
+     unNullableTable :: NullableTable exprRecord -> exprRecord
+     unNullableTable (NullableTable r) = r
+
+     -- FORBIDDEN (triggers GHC-43406 with polymorphic HasField instance)
+     newtype NullableTable exprRecord = NullableTable { unNullableTable :: exprRecord }
+     ```
+
+2. **Type Families & Ambiguous Type Variables (`GHC-83865`):**
+   Non-injective open type families like `LiftMay a` and `Col ctx a` cannot determine ambiguous type variables when applied to polymorphic terms (like `colExpr "table" "col"`).
+   * **Rule:** Always ensure expressions passed to type family operators have concrete type annotations (`colExpr ... :: QExpr Text`) or bind records to concrete type aliases (`type User = UserT 'Result`, `type UserExpr = UserT 'Expr`).
+
+3. **HLint Functor Law Warning in QuickCheck Property Suites:**
+   When writing algebraic tests verifying the Functor identity and composition laws (`fmap id == id` and `fmap (f . g) == fmap f . fmap g`), HLint flags them as redundant simplifications.
+   * **Rule:** Add `{-# HLINT ignore "Functor law" #-}` to the specific test module so full algebraic verification is retained without breaking lint gates.
+
+4. **CI Fourmolu Scope & Root Haskell Files (`Setup.hs`):**
+   `run-fourmolu` in GitHub Actions and local `make format-check` must cover all tracked Haskell files, including root `Setup.hs` and example files.
+   * **Rule:** Always format `Setup.hs` alongside `src/`, `app/`, and `test/` using `make format`. Do not leave root or script Haskell files unformatted.
+

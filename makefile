@@ -16,11 +16,11 @@ lint:
 
 ## Format source code with Fourmolu
 format:
-	fourmolu -i src/ app/ test/
+	fourmolu -i src/ app/ test/ Setup.hs
 
 ## Check code formatting with Fourmolu
 format-check:
-	fourmolu -m check src/ app/ test/
+	fourmolu -m check src/ app/ test/ Setup.hs
 
 ## Run formal verification gate
 gate:

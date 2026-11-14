@@ -1,4 +1,4 @@
-cabal-version: 2.2
+cabal-version: 1.18
 
 -- This file has been generated from package.yaml by hpack version 0.39.6.
 --
@@ -27,23 +27,27 @@ source-repository head
 
 library
   exposed-modules:
+      Hylo
+      Hylo.Core
+      Hylo.Core.Context
+      Hylo.Core.Expr
+      Hylo.Core.Key
+      Hylo.Core.Nullable
+      Hylo.Core.Table
       Lib
   other-modules:
-      Paths_hylo
-  autogen-modules:
       Paths_hylo
   hs-source-dirs:
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       base >=4.7 && <5
+    , text >=1.2 && <3
   default-language: Haskell2010
 
 executable hylo-exe
   main-is: Main.hs
   other-modules:
-      Paths_hylo
-  autogen-modules:
       Paths_hylo
   hs-source-dirs:
       app
@@ -51,19 +55,22 @@ executable hylo-exe
   build-depends:
       base >=4.7 && <5
     , hylo
+    , text >=1.2 && <3
   default-language: Haskell2010
 
 test-suite hylo-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      Paths_hylo
-  autogen-modules:
+      Hylo.Core.TableSpec
       Paths_hylo
   hs-source-dirs:
       test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      QuickCheck >=2.14
+    , base >=4.7 && <5
+    , hspec >=2.11
     , hylo
+    , text >=1.2 && <3
   default-language: Haskell2010

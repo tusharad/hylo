@@ -17,6 +17,11 @@ jobs:
       - uses: haskell-actions/run-fourmolu@v11
         with:
           version: "0.17.0.0"
+          pattern: |
+            src/**/*.hs
+            app/**/*.hs
+            test/**/*.hs
+            Setup.hs
 
   hlint:
     runs-on: ubuntu-latest
