@@ -280,6 +280,19 @@ All agents and contributors working on this codebase MUST follow this branching 
    When `{-# LANGUAGE GADTs #-}` is enabled on a module, HLint flags `{-# LANGUAGE MonoLocalBinds #-}` as redundant (`Note: Extension MonoLocalBinds is implied by GADTs`).
    * **Rule:** Omit `{-# LANGUAGE MonoLocalBinds #-}` when `{-# LANGUAGE GADTs #-}` is already enabled on the module to satisfy HLint.
 
+50. **Explicit `Show` Instance for Key Wrappers (`Id table a`) in SQL AST Rendering:**
+   Deriving `Show` automatically for wrapper types like `newtype Id (table :: (* -> *) -> *) a = Id { unId :: a }` produces output in Haskell record syntax (e.g. `Id {unId = 42}`). When values of type `Id` are passed to SQL literal combinators (`lit currentOrg`), rendered SQL queries or AST strings end up containing `"org_id" = Id {unId = 42}`, which fails SQL parsing or oracle equality checks.
+   * **Rule:** Explicitly define `instance Show a => Show (Id table a) where showsPrec p (Id a) = showsPrec p a` so that identifier wrappers serialize directly as their underlying scalar literal values (`42` or `"org_123"`).
+
+51. **`aeson-qq` Interpolation Syntax Limitation on JSON Object Keys:**
+   The `aesonQQ` QuasiQuoter supports variable interpolation via `#{var}` only in JSON value positions, not in JSON object key positions (e.g. `[json| { #{colName}: val } |]` causes a compile-time quasi-quoter parsing error).
+   * **Rule:** When generating JSON payloads with dynamic property names (such as QuickCheck property tests generating arbitrary column filter payloads), construct JSON objects programmatically using `Aeson.object [(Key.fromText colName, val)]` or `KeyMap.singleton` instead of attempting string interpolation inside the quasi-quoter.
+
+52. **HLint Flagging of `for_` Traversing `Maybe` in Monadic AST Builders:**
+   When building AST state conditionally based on optional fields (e.g. `queryLimit :: Maybe Int`), writing `for_ (queryLimit q) $ \l -> modify ...` triggers HLint's suggestion to use `case` matching or `whenJust`.
+   * **Rule:** Use explicit pattern matching `case queryLimit q of Just l -> modify ...; Nothing -> pure ()` or `whenJust` rather than `for_` over `Maybe` in monadic AST manipulation functions to avoid HLint warnings under `--pedantic`.
+
+
 
 
 
