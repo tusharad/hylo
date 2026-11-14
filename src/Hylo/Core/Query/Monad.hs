@@ -17,6 +17,7 @@ module Hylo.Core.Query.Monad
   , each
   , eachWith
   , where_
+  , having
   ) where
 
 import Control.DeepSeq (NFData (..))
@@ -38,20 +39,26 @@ data QueryState = QueryState
   , qsRelations :: ![RelationBinding]
   , qsPredicates :: ![QExpr Bool]
   , qsLaterals :: ![LateralBinding]
+  , qsGroupBy :: ![Text]
+  , qsHaving :: ![QExpr Bool]
   }
   deriving (Eq, Show)
 
 instance NFData QueryState where
-  rnf (QueryState n l r p lat) = rnf n `seq` rnf l `seq` rnf r `seq` rnf p `seq` rnf lat
+  rnf (QueryState n l r p lat gb hv) =
+    rnf n `seq` rnf l `seq` rnf r `seq` rnf p `seq` rnf lat `seq` rnf gb `seq` rnf hv
 
 -- | Default initial state for a new Query computation.
 initialQueryState :: QueryState
-initialQueryState = QueryState 0 0 [] [] []
+initialQueryState = QueryState 0 0 [] [] [] [] []
 
 -- | Pure operational Query monad parameterised by database backend marker.
 newtype Query db a = Query
   { runQuery :: QueryState -> (a, QueryState)
   }
+
+instance NFData a => NFData (Query db a) where
+  rnf q = rnf (runQuery q initialQueryState)
 
 instance Functor (Query db) where
   fmap f (Query h) = Query $ \s ->
@@ -94,4 +101,10 @@ eachWith mkExpr schema = Query $ \s ->
 where_ :: QExpr Bool -> Query db ()
 where_ cond = Query $ \s ->
   let s' = s {qsPredicates = qsPredicates s ++ [cond]}
+   in ((), s')
+
+-- | Append a HAVING constraint to the active Query context.
+having :: QExpr Bool -> Query db ()
+having cond = Query $ \s ->
+  let s' = s {qsHaving = qsHaving s ++ [cond]}
    in ((), s')

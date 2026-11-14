@@ -214,4 +214,4 @@ spec = describe "Epic 4: Query Monad AST & Join Flattener" $ do
             pure (u.email, p.bio)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "WHERE (\"users_0\".\"active\" = true)"
+      sql `shouldContain` "WHERE (\"users_0\".\"active\" = TRUE)"

@@ -32,6 +32,7 @@ import Hylo.Core.Query.AST
 import Hylo.Core.Query.Monad
   ( Query (..)
   , QueryState (..)
+  , initialQueryState
   )
 import Hylo.PG.Compiler.JoinFlattener
   ( flattenJoins
@@ -67,7 +68,7 @@ many ::
   Query db a ->
   Query db (NestedList a)
 many childQuery = lateralSubqueriesDict (Proxy :: Proxy db) `seq` Query $ \s ->
-  let childInit = QueryState (qsNextScope s) (qsNextLateral s) [] [] []
+  let childInit = initialQueryState {qsNextScope = qsNextScope s, qsNextLateral = qsNextLateral s}
       (childRes, childSt) = runQuery childQuery childInit
       targetAlias = case qsRelations childSt of
         [] -> "sub_0"
