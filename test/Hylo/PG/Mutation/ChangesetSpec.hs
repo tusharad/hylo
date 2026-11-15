@@ -328,10 +328,8 @@ spec = describe "User Story 5: Wire Changeset into hylo-pg Binary Execution & Er
               , score = Unchanged
               , active = Unchanged
               }
-          cs =
-            validateFormat "email" (.email) "^[^@]+@[^@]+$"
-              $ validateRequired "name" (.name)
-              $ change @'InsertOp patch
+          csReq = validateRequired "name" (.name) (change @'InsertOp patch)
+          cs = validateFormat "email" (.email) "^[^@]+@[^@]+$" csReq
 
       cs.changesetValid `shouldBe` False
       length cs.changesetErrors `shouldBe` 2
