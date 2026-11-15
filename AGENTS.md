@@ -302,6 +302,14 @@ All agents and contributors working on this codebase MUST follow this branching 
    When generating Haskell source code for parameterized type constructors (such as `Embedding "default" 1536`), wrapping them in outer type constructors (such as `Nullable`) without explicit parentheses yields `Nullable Embedding "default" 1536`, which fails GHC's type checker (treating `Nullable` as a 3-argument type constructor).
    * **Rule:** When synthesizing Haskell types in metaprogramming or reverse codegen, any composite type containing spaces must be parenthesized before being wrapped in an outer type constructor: `(Nullable (Embedding "default" 1536))`.
 
+55. **Variable Pattern Shadowing of Record Selectors in AST Evaluators (`GHC-83865`):**
+   In AST pattern matches such as `DropColumnStmt tName colName _`, binding variable names that match record selector names (`colName :: ColumnDef -> ColumnName`) shadows the selector function. When downstream code attempts `filter (\c -> colName c /= colName)`, GHC interprets `colName c` as applying the variable `colName :: ColumnName` to `c`, failing with `[GHC-83865] Couldn't match expected type 'ColumnDef -> ColumnName' with actual type 'ColumnName'`.
+   * **Rule:** Use distinctive variable names (such as `targetColName`, `cName`, or `dropCol`) in pattern matches when the module defines or imports record field accessors of the same name.
+
+56. **Single-Element Conditional Lists in AST Linter Dispatchers:**
+   Writing `if condition then [elem] else []` in AST visitor or linting functions triggers HLint's suggestion to use list comprehensions `[elem | condition]`.
+   * **Rule:** Use list comprehensions `[elem | condition]` for concise, idiomatic conditional error collection in AST linting engines.
+
 
 
 
