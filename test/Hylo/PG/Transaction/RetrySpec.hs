@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoFieldSelectors #-}
@@ -63,6 +64,7 @@ import Hylo.PG.Transaction.Retry
   , simulateDeadlocks
   , simulateSerializationFailureOnce
   , simulateSerializationFailures
+  , pattern TxSerializationFailure
   )
 import Test.Hspec
 import Test.QuickCheck

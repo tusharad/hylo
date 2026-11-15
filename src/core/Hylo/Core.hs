@@ -10,7 +10,12 @@ module Hylo.Core
     Ctx (..)
   , Col
   , PatchField (..)
-  , ColSpec (..)
+  , LogicalType (..)
+  , lVector
+  , renderLogicalType
+  , textToLogicalType
+  , ColDef (..)
+  , ColSpec
 
     -- * Phantom Keys
   , Id (..)

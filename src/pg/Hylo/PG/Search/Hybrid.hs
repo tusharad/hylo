@@ -59,10 +59,11 @@ import qualified Data.Text as T
 import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
 import GHC.TypeNats (natVal)
+import Hylo.Backend.Capability (SQLite)
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query (Postgres, Query (..), QueryState (..))
-import Hylo.Core.Query.AST (Projectable (..), SQLite, renderExpr)
+import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.Core.TypeError (AssertBackendCapability (..))
 import Hylo.PG.Search.RRF
@@ -71,6 +72,9 @@ import Hylo.PG.Vector
 -- | Backend capability certifying database support for single-trip hybrid search.
 class SupportsHybridSearch db where
   hybridSearchDict :: Proxy db -> ()
+
+instance SupportsHybridSearch (Postgres v) where
+  hybridSearchDict _ = ()
 
 instance SupportsHybridSearch Postgres where
   hybridSearchDict _ = ()

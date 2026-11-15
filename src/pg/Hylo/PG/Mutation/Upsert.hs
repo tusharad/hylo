@@ -53,7 +53,7 @@ import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Hylo.Core.Context (ColSpec (..), Ctx (..))
+import Hylo.Core.Context (ColDef (..), ColSpec, Ctx (..))
 import Hylo.Core.Expr (QExpr (..), ToQExpr (..))
 import Hylo.Core.Query (Tx (..), TxMode (..))
 import Hylo.Core.Query.AST (Projectable (..), renderExpr)

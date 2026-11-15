@@ -14,8 +14,15 @@ HyloCodec provides zero-generics, linear-time $O(C)$ Applicative and Profunctor
 codecs for binary wire protocol marshalling and value hydration.
 -}
 module Hylo.Core.Codec
-  ( -- * Core Codec Types
-    Codec (..)
+  ( -- * Logical Types & Column Definitions
+    LogicalType (..)
+  , lVector
+  , ColDef (..)
+  , ColSpec
+  , renderLogicalType
+
+    -- * Core Codec Types
+  , Codec (..)
   , ValueCodec
   , RowCodec
   , Decoder (..)
@@ -64,6 +71,13 @@ import Data.Int (Int32)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32)
+import Hylo.Core.Context
+  ( ColDef (..)
+  , ColSpec
+  , LogicalType (..)
+  , lVector
+  , renderLogicalType
+  )
 import Hylo.Core.Key (Id (..), unId)
 
 -- | State monad decoder parsing binary buffers with descriptive errors.
@@ -183,7 +197,7 @@ runBinaryDecoder codec bs = case runDecoder (codecDecoder codec) bs of
             <> T.pack (show (BS.length rest))
             <> " bytes remaining)"
 
--- | Construct a framed PostgreSQL binary value codec for dynamic-length payloads.
+-- | Construct a framed binary value codec for dynamic-length payloads.
 makeFramedValueCodec ::
   -- | Payload length and builder
   (a -> (Int32, Builder)) ->
@@ -210,7 +224,7 @@ makeFramedValueCodec rawEnc rawDec =
                   Right val -> pure val
     }
 
--- | Construct a framed PostgreSQL binary value codec for fixed-length payloads.
+-- | Construct a framed binary value codec for fixed-length payloads.
 makeFramedFixedCodec ::
   -- | Fixed payload length in bytes
   Int32 ->
@@ -238,7 +252,7 @@ makeFramedFixedCodec fixedLen rawEnc rawDec =
                   Right val -> pure val
     }
 
--- | Lift a 'ValueCodec' to handle nullable columns via PostgreSQL libpq -1 marker.
+-- | Lift a 'ValueCodec' to handle nullable columns via binary wire protocol null marker (-1).
 nullable :: ValueCodec a -> ValueCodec (Maybe a)
 nullable vc =
   Codec

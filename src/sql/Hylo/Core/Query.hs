@@ -15,8 +15,9 @@ Transactional mutation operations (insert, update, delete) statically guarded
 against execution in 'ReadOnly' mode via closed TypeError assertion families.
 -}
 module Hylo.Core.Query
-  ( -- * Backend Markers
-    Postgres
+  ( -- * Backend Markers & Engine Versions
+    PGVersion (..)
+  , Postgres
   , SQLite
   , MySQL
   , Redis
@@ -47,13 +48,13 @@ module Hylo.Core.Query
   , module Hylo.Core.Expr
 
     -- * Aggregation & Grouping
-  , module Hylo.Core.Query.Aggregate
+  , module Hylo.SQL.Query.Aggregate
 
     -- * Window Functions & Framing
-  , module Hylo.Core.Query.Window
+  , module Hylo.SQL.Query.Window
 
     -- * Common Table Expressions & Recursive Graphs
-  , module Hylo.Core.Query.Recursive
+  , module Hylo.SQL.Query.Recursive
 
     -- * Keyset Pagination
   , module Hylo.Core.Query.Pagination
@@ -76,6 +77,13 @@ where
 
 import Data.Int (Int64)
 import Data.Proxy (Proxy (..))
+import Hylo.Backend.Capability
+  ( MySQL
+  , PGVersion (..)
+  , Postgres
+  , Redis
+  , SQLite
+  )
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr
 import Hylo.Core.Key (Id)
@@ -84,12 +92,8 @@ import Hylo.Core.Query.AST
   , LockClause (..)
   , LockStrength (..)
   , LockWait (..)
-  , MySQL
-  , Postgres
   , Projectable (..)
-  , Redis
   , RelationBinding (..)
-  , SQLite
   , ScopeId (..)
   , exprAliases
   , formatScope
@@ -97,7 +101,6 @@ import Hylo.Core.Query.AST
   , renderExpr
   , renderLockClause
   )
-import Hylo.Core.Query.Aggregate
 import Hylo.Core.Query.Monad
   ( FromRelation (..)
   , Query (..)
@@ -110,21 +113,22 @@ import Hylo.Core.Query.Monad
   , where_
   )
 import Hylo.Core.Query.Pagination
-import Hylo.Core.Query.Recursive
-import Hylo.Core.Query.Window
 import Hylo.Core.Table (Changeset (..), TableSchema (..), emptyChangeset, withUniqueKey)
 import Hylo.Core.Transaction
 import Hylo.Core.TypeError (AssertWritable (..))
+import Hylo.SQL.Query.Aggregate
+import Hylo.SQL.Query.Recursive
+import Hylo.SQL.Query.Window
 
 -- | Monadic query execution combinator within transactions.
-select :: Query db a -> Tx db mode a
+select :: forall k (db :: k) a (mode :: TxMode). Query db a -> Tx db mode a
 select q = TxAction $ \st ->
   let (res, _qState) = runQuery q initialQueryState
    in (Right res, st)
 
 -- | Statically guarded insert operation. Fails with [Hylo Error E005] in ReadOnly mode.
 insert ::
-  forall table db (mode :: TxMode).
+  forall k (db :: k) table (mode :: TxMode).
   (AssertWritable mode) =>
   TableSchema table ->
   Changeset table ->
@@ -146,7 +150,7 @@ insert schema cs =
 
 -- | Statically guarded update operation. Fails with [Hylo Error E005] in ReadOnly mode.
 update ::
-  forall table db (mode :: TxMode).
+  forall k (db :: k) table (mode :: TxMode).
   (AssertWritable mode) =>
   TableSchema table ->
   Changeset table ->
@@ -159,7 +163,7 @@ update schema _ =
 
 -- | Statically guarded delete operation. Fails with [Hylo Error E005] in ReadOnly mode.
 delete ::
-  forall table db (mode :: TxMode).
+  forall k (db :: k) table (mode :: TxMode).
   (AssertWritable mode) =>
   TableSchema table ->
   Id table Int64 ->

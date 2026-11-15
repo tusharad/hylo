@@ -12,16 +12,8 @@ License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
 -}
 module Hylo.Core.Query.AST
-  ( -- * Database Backend Markers
-    Postgres
-  , SQLite
-  , MySQL
-  , Redis
-  , MongoDB
-  , DynamoDB
-
-    -- * Query AST & Scopes
-  , ScopeId (..)
+  ( -- * Query AST & Scopes
+    ScopeId (..)
   , formatScope
   , generateScopes
   , RelationBinding (..)
@@ -57,24 +49,6 @@ instance NFData (QExpr a) where
     StringAggExpr arg delim mFilter -> rnf arg `seq` rnf delim `seq` rnf mFilter
     RowCmpExpr op cols aliases n ->
       rnf op `seq` rnf cols `seq` rnf aliases `seq` rnf n
-
--- | Phantom type identifying the PostgreSQL database engine.
-data Postgres
-
--- | Phantom type identifying the SQLite database engine.
-data SQLite
-
--- | Phantom type identifying the MySQL database engine.
-data MySQL
-
--- | Phantom type identifying the Redis database engine.
-data Redis
-
--- | Phantom type identifying the MongoDB database engine.
-data MongoDB
-
--- | Phantom type identifying the DynamoDB database engine.
-data DynamoDB
 
 -- | Deterministic, collision-free relation scope identifier.
 newtype ScopeId = ScopeId
@@ -114,7 +88,7 @@ data LateralBinding = LateralBinding
 instance NFData LateralBinding where
   rnf (LateralBinding a s) = rnf a `seq` rnf s
 
--- | PostgreSQL 12+ CTE materialization fence.
+-- | Common Table Expression materialization fence.
 data Materialization
   = DefaultMaterialization
   | Materialized
@@ -124,7 +98,7 @@ data Materialization
 instance NFData Materialization where
   rnf m = m `seq` ()
 
--- | Cycle detection clause for recursive CTEs (PostgreSQL 14+).
+-- | Cycle detection clause for recursive CTEs.
 data CycleClause = CycleClause
   { cycleColumn :: !Text
   , cycleSetColumn :: !Text
@@ -172,7 +146,7 @@ instance NFData FromItem where
     LeftJoinLateral l s a -> rnf l `seq` rnf s `seq` rnf a
     CrossJoin l r -> rnf l `seq` rnf r
 
--- | Pessimistic locking strength in PostgreSQL.
+-- | Pessimistic locking strength.
 data LockStrength
   = ForUpdate
   | ForNoKeyUpdate
@@ -204,7 +178,7 @@ data LockClause = LockClause
 instance NFData LockClause where
   rnf (LockClause s w ts) = rnf s `seq` rnf w `seq` rnf ts
 
--- | Render a lock clause into PostgreSQL SQL syntax.
+-- | Render a lock clause into SQL syntax.
 renderLockClause :: LockClause -> Text
 renderLockClause (LockClause str wait tables) =
   let strText = case str of

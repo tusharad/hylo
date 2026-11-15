@@ -9,8 +9,16 @@ Structural schema catalog definitions (TableCatalogDef, ColumnCatalogDef) for
 diffing, DDL generation, migrations, and AI tooling.
 -}
 module Hylo.Core.Schema
-  ( -- * Re-exports from Table
-    TableSchema (..)
+  ( -- * Logical Types & Column Definitions
+    LogicalType (..)
+  , lVector
+  , ColDef (..)
+  , ColSpec
+  , renderLogicalType
+  , textToLogicalType
+
+    -- * Re-exports from Table
+  , TableSchema (..)
   , tableSchema
   , column
   , nullableColumn
@@ -26,7 +34,14 @@ module Hylo.Core.Schema
   ) where
 
 import Data.Text (Text)
-import Hylo.Core.Context (ColSpec (..))
+import Hylo.Core.Context
+  ( ColDef (..)
+  , ColSpec
+  , LogicalType (..)
+  , lVector
+  , renderLogicalType
+  , textToLogicalType
+  )
 import Hylo.Core.Table
   ( TableSchema (..)
   , column
@@ -55,8 +70,8 @@ data ColumnCatalogDef = ColumnCatalogDef
   }
   deriving (Eq, Show)
 
--- | Convert a column 'ColSpec' into a 'ColumnCatalogDef'.
-toColumnCatalogDef :: ColSpec a -> ColumnCatalogDef
+-- | Convert a column 'ColDef' into a 'ColumnCatalogDef'.
+toColumnCatalogDef :: ColDef a -> ColumnCatalogDef
 toColumnCatalogDef spec =
   ColumnCatalogDef
     { colDefName = colName spec

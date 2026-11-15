@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
@@ -36,7 +36,6 @@ module Hylo.PG.Pool.Routing
 
 import Control.DeepSeq (NFData (..))
 import Data.Text (Text)
-import Hylo.Core.Query (Postgres)
 import Hylo.Core.Transaction (Tx (..), TxError (..), TxMode (..))
 import Hylo.PG.Connection (Pool (..), createPool, defaultPool, runTx)
 import Hylo.PG.Transaction.Retry
@@ -110,7 +109,7 @@ routeNode mode cluster = case mode of
 runClusterTx ::
   ClusterPool ->
   TxMode ->
-  Tx Postgres mode a ->
+  Tx db mode a ->
   IO (Either TxError a)
 runClusterTx cluster mode tx = do
   let (_, target) = routeNode mode cluster
@@ -119,7 +118,7 @@ runClusterTx cluster mode tx = do
 -- | Statically verified read-only transaction execution routed to a replica connection.
 runReadOnlyTx ::
   ClusterPool ->
-  Tx Postgres 'ReadOnly a ->
+  Tx db 'ReadOnly a ->
   IO (Either TxError a)
 runReadOnlyTx cluster tx = do
   let (_, target) = routeNode ReadOnly cluster
@@ -131,7 +130,7 @@ runClusterTxWithRetry ::
   ClusterPool ->
   TxMode ->
   IsolationLevel ->
-  Tx Postgres mode a ->
+  Tx db mode a ->
   IO (Either TxError a)
 runClusterTxWithRetry policy cluster mode iso tx = do
   let (_, target) = routeNode mode cluster

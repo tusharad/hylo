@@ -16,15 +16,19 @@ module Hylo.Redis
     -- * Redis Command Descriptors
   , RedisCmd (..)
   , renderRedisCmd
+
+    -- * TableSchema Integration
+  , redisTableKey
+  , redisHGetCol
+  , redisHSetCol
   ) where
 
 import Data.ByteString (ByteString)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
 import GHC.Generics (Generic)
-
--- | Phantom type identifying the Redis database engine.
-data Redis
+import Hylo.Backend.Capability (Redis)
+import Hylo.Core (ColDef (..), TableSchema (..))
 
 -- | Abstract commands supported by the Hylo Redis engine.
 data RedisCmd
@@ -45,3 +49,15 @@ renderRedisCmd = \case
   RedisHSet k f v -> "HSET " <> k <> " " <> f <> " " <> decodeUtf8Lenient v
   where
     decodeUtf8Lenient = TE.decodeUtf8With (\_ _ -> Just '?')
+
+-- | Formulate a canonical Redis key from a 'TableSchema' and record ID.
+redisTableKey :: TableSchema table -> Text -> Text
+redisTableKey schema recId = tableName schema <> ":" <> recId
+
+-- | Construct a Redis HGET command for a specific table column.
+redisHGetCol :: TableSchema table -> Text -> ColDef a -> RedisCmd
+redisHGetCol schema recId col = RedisHGet (redisTableKey schema recId) (colName col)
+
+-- | Construct a Redis HSET command for a specific table column and binary payload.
+redisHSetCol :: TableSchema table -> Text -> ColDef a -> ByteString -> RedisCmd
+redisHSetCol schema recId col = RedisHSet (redisTableKey schema recId) (colName col)

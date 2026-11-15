@@ -14,5 +14,5 @@ module Hylo.SQLite
   , renderSQLiteSQLText
   ) where
 
-import Hylo.Core.Query.AST (SQLite)
+import Hylo.Backend.Capability (SQLite)
 import Hylo.SQLite.Compiler (renderSQLiteSQL, renderSQLiteSQLText)

@@ -70,14 +70,14 @@ library hylo-sql
       Hylo.SQL
       Hylo.SQL.AST
       Hylo.SQL.Compiler.JoinFlattener
+      Hylo.SQL.Query.Aggregate
+      Hylo.SQL.Query.CTE
+      Hylo.SQL.Query.Recursive
+      Hylo.SQL.Query.Window
       Hylo.Core.Query
       Hylo.Core.Query.AST
-      Hylo.Core.Query.Aggregate
-      Hylo.Core.Query.CTE
       Hylo.Core.Query.Monad
       Hylo.Core.Query.Pagination
-      Hylo.Core.Query.Recursive
-      Hylo.Core.Query.Window
   build-depends:
       base >=4.7 && <5
     , bytestring >=0.10 && <0.13
@@ -170,6 +170,7 @@ library hylo-redis
     , bytestring >=0.10 && <0.13
     , containers >=0.6 && <0.8
     , hylo:hylo-core
+    , hylo:hylo-sql
     , text >=1.2 && <3
 
 library
