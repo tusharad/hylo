@@ -97,6 +97,9 @@ library
     , bytestring >=0.10 && <0.13
     , containers >=0.6 && <0.8
     , deepseq >=1.4 && <2
+    , hasql >=1.6 && <2
+    , hasql-pool >=1.0 && <2
+    , hasql-transaction >=1.1 && <2
     , scientific ==0.3.*
     , stm >=2.5 && <3
     , template-haskell >=2.16 && <3
@@ -119,6 +122,9 @@ executable hylo-exe
     , bytestring >=0.10 && <0.13
     , containers >=0.6 && <0.8
     , deepseq >=1.4 && <2
+    , hasql >=1.6 && <2
+    , hasql-pool >=1.0 && <2
+    , hasql-transaction >=1.1 && <2
     , hylo
     , scientific ==0.3.*
     , stm >=2.5 && <3
@@ -147,10 +153,12 @@ test-suite hylo-test
       Hylo.PG.Compiler.WindowSpec
       Hylo.PG.Mutation.BulkSpec
       Hylo.PG.Mutation.UpsertSpec
+      Hylo.PG.RealPostgresSpec
       Hylo.PG.Search.HybridSpec
       Hylo.PG.Streaming.CursorSpec
       Hylo.PG.Transaction.RetrySpec
       Hylo.PG.VectorSpec
+      Hylo.Test.Docker
       Test.Hylo.AI.QueryToolSpec
       Test.Hylo.Backend.CapabilitySpec
       Test.Hylo.Core.CodecSpec
@@ -182,8 +190,12 @@ test-suite hylo-test
     , bytestring >=0.10 && <0.13
     , containers >=0.6 && <0.8
     , deepseq >=1.4
+    , hasql >=1.6 && <2
+    , hasql-pool >=1.0 && <2
+    , hasql-transaction >=1.1 && <2
     , hspec >=2.11
     , hylo
+    , process >=1.6 && <2
     , scientific ==0.3.*
     , should-not-typecheck >=2.1
     , stm >=2.5 && <3

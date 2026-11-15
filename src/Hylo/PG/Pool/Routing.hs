@@ -79,8 +79,8 @@ defaultClusterPool =
   ClusterPool
     { primaryPool = defaultPool
     , replicaPools =
-        [ Pool "postgresql://localhost:5433/hylo_replica_1" 10
-        , Pool "postgresql://localhost:5434/hylo_replica_2" 10
+        [ Pool "postgresql://localhost:5433/hylo_replica_1" 10 Nothing
+        , Pool "postgresql://localhost:5434/hylo_replica_2" 10 Nothing
         ]
     }
 
