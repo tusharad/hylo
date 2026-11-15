@@ -97,10 +97,10 @@ chunkList n xs
 Fails with [Hylo Error E005] when evaluated within 'ReadOnly' transactions.
 -}
 insertMany ::
-  forall table db (mode :: TxMode) f.
+  forall table db (mode :: TxMode) f op.
   (AssertWritable mode, BulkInsertable table, Foldable f) =>
   TableSchema table ->
-  f (Changeset table) ->
+  f (Changeset table op) ->
   Tx db mode [table 'Result]
 insertMany schema csFoldable =
   writableDict (Proxy :: Proxy mode) `seq`
@@ -142,20 +142,20 @@ insertMany schema csFoldable =
 
 -- | Variant of 'insertMany' that discards hydrated results.
 insertMany_ ::
-  forall table db (mode :: TxMode) f.
+  forall table db (mode :: TxMode) f op.
   (AssertWritable mode, BulkInsertable table, Foldable f) =>
   TableSchema table ->
-  f (Changeset table) ->
+  f (Changeset table op) ->
   Tx db mode ()
 insertMany_ schema records = void (insertMany schema records)
 
 -- | Chunked bulk insertion dividing large batches into sub-batches of size @chunkSize@.
 chunkedInsertMany ::
-  forall table db (mode :: TxMode).
+  forall table db (mode :: TxMode) op.
   (AssertWritable mode, BulkInsertable table) =>
   Int ->
   TableSchema table ->
-  [Changeset table] ->
+  [Changeset table op] ->
   Tx db mode [table 'Result]
 chunkedInsertMany chunkSize schema records
   | chunkSize <= 0 = insertMany schema records

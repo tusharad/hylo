@@ -20,15 +20,14 @@ module Hylo.Core.Table
   , primaryKey
   , foreignKey
   , describeCol
-  , Changeset (..)
-  , emptyChangeset
-  , withUniqueKey
   , ColDef (..)
   , ColSpec
   , LogicalType (..)
   ) where
 
 import Data.Kind (Type)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Hylo.Core.Context
   ( ColDef (..)
@@ -47,6 +46,10 @@ class Table (table :: Ctx -> Type) where
   tableExprColumns _ = []
   tableColumnsMeta :: table 'Meta -> [(Text, Text)]
   tableColumnsMeta _ = []
+  diffTable :: table 'Result -> table 'Result -> table 'Patch
+  diffTable _ _ = errorWithoutStackTrace "diffTable: not implemented for table"
+  dirtyFieldsTable :: table 'Patch -> Map Text Text
+  dirtyFieldsTable _ = Map.empty
 
 -- | Construct a typed SQL column expression for an alias and a column specification.
 colSpecExpr :: Text -> ColDef a -> QExpr a
@@ -113,17 +116,3 @@ foreignKey name lt =
 -- | Attach an AI/documentation description to a column specification.
 describeCol :: Text -> ColDef a -> ColDef a
 describeCol desc colDef = colDef {colDescription = Just desc}
-
--- | Changeset descriptor for table records.
-data Changeset (table :: Ctx -> Type) = Changeset
-  { changesetPatch :: table 'Patch
-  , changesetKey :: !Text
-  }
-
--- | Construct an empty changeset.
-emptyChangeset :: table 'Patch -> Changeset table
-emptyChangeset patch = Changeset patch ""
-
--- | Attach a simulated unique key for conflict detection in transactions.
-withUniqueKey :: Text -> Changeset table -> Changeset table
-withUniqueKey key cs = cs {changesetKey = key}

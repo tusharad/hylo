@@ -63,9 +63,7 @@ module Hylo.Core.Query
   , module Hylo.Core.Transaction
 
     -- * Changeset Abstraction
-  , Changeset (..)
-  , emptyChangeset
-  , withUniqueKey
+  , module Hylo.Core.Changeset
 
     -- * Statically Guarded Mutations
   , select
@@ -83,6 +81,12 @@ import Hylo.Backend.Capability
   , Postgres
   , Redis
   , SQLite
+  )
+import Hylo.Core.Changeset
+  ( Changeset (..)
+  , OpKind (..)
+  , emptyChangeset
+  , withUniqueKey
   )
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr
@@ -113,7 +117,7 @@ import Hylo.Core.Query.Monad
   , where_
   )
 import Hylo.Core.Query.Pagination
-import Hylo.Core.Table (Changeset (..), TableSchema (..), emptyChangeset, withUniqueKey)
+import Hylo.Core.Table (TableSchema (..))
 import Hylo.Core.Transaction
 import Hylo.Core.TypeError (AssertWritable (..))
 import Hylo.SQL.Query.Aggregate
@@ -128,10 +132,10 @@ select q = TxAction $ \st ->
 
 -- | Statically guarded insert operation. Fails with [Hylo Error E005] in ReadOnly mode.
 insert ::
-  forall k (db :: k) table (mode :: TxMode).
+  forall k (db :: k) table (mode :: TxMode) op.
   (AssertWritable mode) =>
   TableSchema table ->
-  Changeset table ->
+  Changeset table op ->
   Tx db mode (table 'Result)
 insert schema cs =
   writableDict (Proxy :: Proxy mode) `seq`
@@ -150,10 +154,10 @@ insert schema cs =
 
 -- | Statically guarded update operation. Fails with [Hylo Error E005] in ReadOnly mode.
 update ::
-  forall k (db :: k) table (mode :: TxMode).
+  forall k (db :: k) table (mode :: TxMode) op.
   (AssertWritable mode) =>
   TableSchema table ->
-  Changeset table ->
+  Changeset table op ->
   Tx db mode (table 'Result)
 update schema _ =
   writableDict (Proxy :: Proxy mode) `seq`

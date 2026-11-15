@@ -37,7 +37,7 @@ import Hylo.AI.QueryTool
 import Hylo.Core.Context (Col, Ctx (..))
 import Hylo.Core.Expr (lit, (==.))
 import Hylo.Core.Key (Id (..))
-import Hylo.Core.Query (Changeset, Postgres, insert)
+import Hylo.Core.Query (Changeset, OpKind (..), Postgres, insert)
 import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Table
   ( Table (..)
@@ -239,7 +239,7 @@ spec = describe "Epic 17: Sandboxed Structured Agent Query Compiler" $ do
     it "Law 3: Compile-Time Rejection of Mutations in ReadOnly Tx" $ do
       shouldNotTypecheckWith
         "[Hylo Error E005]"
-        ( let invalidTx = insert docTable (undefined :: Changeset DocumentT)
+        ( let invalidTx = insert docTable (undefined :: Changeset DocumentT 'InsertOp)
            in (invalidTx :: Tx Postgres 'ReadOnly (DocumentT 'Result))
         )
 

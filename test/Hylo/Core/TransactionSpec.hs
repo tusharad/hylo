@@ -83,7 +83,7 @@ userTable =
       }
 
 -- | Construct a valid user changeset.
-validUser :: Text -> Changeset UserT
+validUser :: Text -> Changeset UserT 'InsertOp
 validUser name =
   withUniqueKey name $
     emptyChangeset
@@ -93,7 +93,7 @@ validUser name =
         }
 
 -- | Construct a duplicate user changeset conflicting on unique key.
-duplicateUser :: Text -> Changeset UserT
+duplicateUser :: Text -> Changeset UserT 'InsertOp
 duplicateUser name =
   withUniqueKey name $
     emptyChangeset
