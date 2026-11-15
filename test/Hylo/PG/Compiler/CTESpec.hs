@@ -125,7 +125,7 @@ spec = describe "Epic 8: Common Table Expressions & Recursive Graphs" $ do
       sql `shouldContain` "SELECT \"employees_0\".\"id\", \"employees_0\".\"name\", 1"
       sql
         `shouldContain` "SELECT \"employees_1\".\"id\", \"employees_1\".\"name\", (\"org_tree_2\".\"depth\" + 1)"
-      sql `shouldContain` "ORDER BY \"org_tree_3\".\"depth\" ASC, \"org_tree_3\".\"name\" ASC"
+      sql `shouldContain` "ORDER BY \"t0\".\"depth\" ASC, \"t0\".\"name\" ASC"
 
   describe "Contract Elicitation: Formal Laws" $ do
     it "Law 1: Least Fixed Point Semantics of Recursive CTEs (Closure convergence invariant)" $
@@ -185,8 +185,8 @@ spec = describe "Epic 8: Common Table Expressions & Recursive Graphs" $ do
         sqlMat `shouldContain` "WITH \"filtered\" AS MATERIALIZED ("
         sqlNotMat `shouldContain` "WITH \"filtered\" AS NOT MATERIALIZED ("
         -- Both project the identical columns and aliases
-        sqlMat `shouldContain` "SELECT \"filtered_1\".\"id\", \"filtered_1\".\"name\""
-        sqlNotMat `shouldContain` "SELECT \"filtered_1\".\"id\", \"filtered_1\".\"name\""
+        sqlMat `shouldContain` "SELECT \"t0\".\"id\", \"t0\".\"name\""
+        sqlNotMat `shouldContain` "SELECT \"t0\".\"id\", \"t0\".\"name\""
 
   describe "Comprehensive Common Table Expressions & Cycle Controls" $ do
     it "compiles standard non-recursive CTE (with)" $ do

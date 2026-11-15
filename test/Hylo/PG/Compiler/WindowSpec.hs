@@ -130,11 +130,11 @@ spec = describe "Epic 7: Advanced Window Functions" $ do
             pure (t.id, t.amount, runningTotal, prevAmount, rowNum)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "SUM(\"transactions_0\".\"amount\") OVER ("
-      sql `shouldContain` "PARTITION BY \"transactions_0\".\"account_id\""
-      sql `shouldContain` "ORDER BY \"transactions_0\".\"transacted_at\" DESC"
+      sql `shouldContain` "SUM(\"t0\".\"amount\") OVER ("
+      sql `shouldContain` "PARTITION BY \"t0\".\"account_id\""
+      sql `shouldContain` "ORDER BY \"t0\".\"transacted_at\" DESC"
       sql `shouldContain` "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"
-      sql `shouldContain` "LAG(\"transactions_0\".\"amount\", 1) OVER"
+      sql `shouldContain` "LAG(\"t0\".\"amount\", 1) OVER"
 
     it "statically rejects placing window expressions inside WHERE clauses" $
       shouldNotTypecheck
@@ -204,10 +204,10 @@ spec = describe "Epic 7: Advanced Window Functions" $ do
             pure (t.id, nextAmount, firstAmt, lastAmt, nthAmt)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "LEAD(\"transactions_0\".\"amount\", 2) OVER ("
-      sql `shouldContain` "FIRST_VALUE(\"transactions_0\".\"amount\") OVER ("
-      sql `shouldContain` "LAST_VALUE(\"transactions_0\".\"amount\") OVER ("
-      sql `shouldContain` "NTH_VALUE(\"transactions_0\".\"amount\", 3) OVER ("
+      sql `shouldContain` "LEAD(\"t0\".\"amount\", 2) OVER ("
+      sql `shouldContain` "FIRST_VALUE(\"t0\".\"amount\") OVER ("
+      sql `shouldContain` "LAST_VALUE(\"t0\".\"amount\") OVER ("
+      sql `shouldContain` "NTH_VALUE(\"t0\".\"amount\", 3) OVER ("
 
     it "compiles rangeBetween and groupsBetween framing specifications" $ do
       let q = do
@@ -233,4 +233,4 @@ spec = describe "Epic 7: Advanced Window Functions" $ do
           sql :: String
           sql = renderSQL q
       sql
-        `shouldContain` "ORDER BY \"transactions_0\".\"amount\" ASC NULLS FIRST, \"transactions_0\".\"transacted_at\" DESC NULLS LAST"
+        `shouldContain` "ORDER BY \"t0\".\"amount\" ASC NULLS FIRST, \"t0\".\"transacted_at\" DESC NULLS LAST"

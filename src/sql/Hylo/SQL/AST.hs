@@ -47,8 +47,8 @@ instance NFData (QExpr a) where
     CoalesceExpr m dflt -> rnf m `seq` rnf dflt
     AggOpExpr fn arg mFilter -> rnf fn `seq` rnf arg `seq` rnf mFilter
     StringAggExpr arg delim mFilter -> rnf arg `seq` rnf delim `seq` rnf mFilter
-    RowCmpExpr op cols aliases n ->
-      rnf op `seq` rnf cols `seq` rnf aliases `seq` rnf n
+    RowCmpExpr op cols aliases vals n ->
+      rnf op `seq` rnf cols `seq` rnf aliases `seq` rnf vals `seq` rnf n
 
 -- | Deterministic, collision-free relation scope identifier.
 newtype ScopeId = ScopeId
@@ -229,7 +229,7 @@ renderExpr = \case
      in case mFilter of
           Nothing -> base
           Just cond -> base <> " FILTER (WHERE " <> renderExpr cond <> ")"
-  RowCmpExpr op cols _ nParams ->
+  RowCmpExpr op cols _ _ nParams ->
     let lhs = "(" <> T.intercalate ", " cols <> ")"
         rhs = "(" <> T.intercalate ", " ["$" <> T.pack (show i) | i <- [1 .. nParams]] <> ")"
      in "(" <> lhs <> " " <> op <> " " <> rhs <> ")"
@@ -245,7 +245,7 @@ exprAliases = \case
   CoalesceExpr m dflt -> exprAliases m ++ exprAliases dflt
   AggOpExpr _ arg mFilter -> exprAliases arg ++ maybe [] exprAliases mFilter
   StringAggExpr arg delim mFilter -> exprAliases arg ++ exprAliases delim ++ maybe [] exprAliases mFilter
-  RowCmpExpr _ _ aliases _ -> aliases
+  RowCmpExpr _ _ aliases _ _ -> aliases
 
 -- | Class of types that can be projected into SQL SELECT column lists.
 class Projectable a where

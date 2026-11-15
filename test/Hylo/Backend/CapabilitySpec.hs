@@ -64,6 +64,8 @@ import Hylo.Core.Query
   , limit
   , offset
   , orderBy
+  , previewPostgresSQL
+  , previewSQLiteSQL
   , renderExpr
   , renderPostgresSQL
   , renderSQLiteSQL
@@ -199,8 +201,8 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
             where_ (u.active ==. lit True)
             where_ (u.totalSpend >. lit 100)
             pure (u.id, u.email)
-          pgSQL = renderPostgresSQL q
-          sqliteSQL = renderSQLiteSQL q
+          pgSQL = previewPostgresSQL q
+          sqliteSQL = previewSQLiteSQL q
       pgSQL `shouldBe` sqliteSQL
 
     it "renders identical SQL for relational JOIN queries across PostgreSQL and SQLite" $ do
@@ -223,8 +225,8 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
               pure (u.orgId, spendSum)
             having (totalSpend >. lit 500)
             pure (orgId, totalSpend)
-          pgSQL = renderPostgresSQL q
-          sqliteSQL = renderSQLiteSQL q
+          pgSQL = previewPostgresSQL q
+          sqliteSQL = previewSQLiteSQL q
       pgSQL `shouldBe` sqliteSQL
 
     it "renders identical SQL for ORDER BY, LIMIT, and OFFSET across PostgreSQL and SQLite" $ do
@@ -383,6 +385,6 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
       let sqliteSql = SQLite.renderSQLiteSQL (each userTable)
       let redisCmd = Redis.renderRedisCmd (Redis.redisHGetCol userTable "42" (tableMeta userTable).email)
       T.unpack pgSql `shouldContain` "FROM \"users\""
-      T.unpack mySql `shouldContain` "FROM \"users\""
+      T.unpack mySql `shouldContain` "FROM `users`"
       T.unpack sqliteSql `shouldContain` "FROM \"users\""
       redisCmd `shouldBe` "HGET users:42 email"

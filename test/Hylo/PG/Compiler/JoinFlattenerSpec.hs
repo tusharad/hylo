@@ -137,9 +137,9 @@ spec = describe "Epic 4: Query Monad AST & Join Flattener" $ do
             pure (u.email, p.bio)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "FROM \"users\" AS \"users_0\""
+      sql `shouldContain` "FROM \"users\" AS \"t0\""
       sql
-        `shouldContain` "INNER JOIN \"profiles\" AS \"profiles_1\" ON (\"profiles_1\".\"user_id\" = \"users_0\".\"id\")"
+        `shouldContain` "INNER JOIN \"profiles\" AS \"t1\" ON (\"t1\".\"user_id\" = \"t0\".\"id\")"
       sql `shouldNotContain` "CROSS JOIN"
 
     it "allocates strictly monotonic and unique ScopeIds across complex subqueries" $
@@ -188,11 +188,11 @@ spec = describe "Epic 4: Query Monad AST & Join Flattener" $ do
             pure (u.email, p.bio, o.total)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "FROM \"users\" AS \"users_0\""
+      sql `shouldContain` "FROM \"users\" AS \"t0\""
       sql
-        `shouldContain` "INNER JOIN \"profiles\" AS \"profiles_1\" ON (\"profiles_1\".\"user_id\" = \"users_0\".\"id\")"
+        `shouldContain` "INNER JOIN \"profiles\" AS \"t1\" ON (\"t1\".\"user_id\" = \"t0\".\"id\")"
       sql
-        `shouldContain` "INNER JOIN \"orders\" AS \"orders_2\" ON (\"orders_2\".\"user_id\" = \"users_0\".\"id\")"
+        `shouldContain` "INNER JOIN \"orders\" AS \"t2\" ON (\"t2\".\"user_id\" = \"t0\".\"id\")"
       sql `shouldNotContain` "CROSS JOIN"
 
     it "falls back to CROSS JOIN when relations share no connecting join predicates" $ do
@@ -202,7 +202,7 @@ spec = describe "Epic 4: Query Monad AST & Join Flattener" $ do
             pure (u.email, p.bio)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "FROM \"users\" AS \"users_0\" CROSS JOIN \"profiles\" AS \"profiles_1\""
+      sql `shouldContain` "FROM \"users\" AS \"t0\" CROSS JOIN \"profiles\" AS \"t1\""
       sql `shouldNotContain` "INNER JOIN"
 
     it "separates non-join filter predicates into the WHERE clause" $ do
@@ -214,4 +214,4 @@ spec = describe "Epic 4: Query Monad AST & Join Flattener" $ do
             pure (u.email, p.bio)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "WHERE (\"users_0\".\"active\" = TRUE)"
+      sql `shouldContain` "WHERE (\"t0\".\"active\" = TRUE)"

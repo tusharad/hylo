@@ -147,7 +147,7 @@ spec = describe "Epic 10: Binary Cursor Streaming & Keyset Pagination" $ do
             limit 20
             pure doc
           sql = renderSQL q
-      sql `shouldContain` "(\"documents_0\".\"created_at\", \"documents_0\".\"id\") < ($1, $2)"
+      sql `shouldContain` "(\"t0\".\"created_at\", \"t0\".\"id\") < ($1, $2)"
       sql `shouldNotContain` "OFFSET"
 
   describe "Contract Elicitation: Formal Laws" $ do
@@ -241,7 +241,7 @@ spec = describe "Epic 10: Binary Cursor Streaming & Keyset Pagination" $ do
             limit 20
             pure doc
           sql = renderSQL q
-      sql `shouldContain` "(\"documents_0\".\"created_at\", \"documents_0\".\"id\") > ($1, $2)"
+      sql `shouldContain` "(\"t0\".\"created_at\", \"t0\".\"id\") > ($1, $2)"
       sql `shouldNotContain` "OFFSET"
 
     it "generates single-column keyset seek predicate" $ do
@@ -252,7 +252,7 @@ spec = describe "Epic 10: Binary Cursor Streaming & Keyset Pagination" $ do
             limit 10
             pure doc
           sql = renderSQL q
-      sql `shouldContain` "(\"documents_0\".\"id\") < ($1)"
+      sql `shouldContain` "(\"t0\".\"id\") < ($1)"
       sql `shouldNotContain` "OFFSET"
 
     it "generates 3-column composite keyset seek predicate" $ do
@@ -265,7 +265,7 @@ spec = describe "Epic 10: Binary Cursor Streaming & Keyset Pagination" $ do
             pure doc
           sql = renderSQL q
       sql
-        `shouldContain` "(\"documents_0\".\"org_id\", \"documents_0\".\"created_at\", \"documents_0\".\"id\") < ($1, $2, $3)"
+        `shouldContain` "(\"t0\".\"org_id\", \"t0\".\"created_at\", \"t0\".\"id\") < ($1, $2, $3)"
 
     it "supports explicitly directed keyset seeks (seekAfterDir and seekBeforeDir)" $ do
       let cursor = (read "2026-01-01 00:00:00 UTC", Id 54321 :: Id DocumentT Int64)
@@ -281,8 +281,8 @@ spec = describe "Epic 10: Binary Cursor Streaming & Keyset Pagination" $ do
             pure doc
           sqlDesc = renderSQL qDesc
 
-      sqlAsc `shouldContain` "(\"documents_0\".\"created_at\", \"documents_0\".\"id\") > ($1, $2)"
-      sqlDesc `shouldContain` "(\"documents_0\".\"created_at\", \"documents_0\".\"id\") < ($1, $2)"
+      sqlAsc `shouldContain` "(\"t0\".\"created_at\", \"t0\".\"id\") > ($1, $2)"
+      sqlDesc `shouldContain` "(\"t0\".\"created_at\", \"t0\".\"id\") < ($1, $2)"
 
     it "renders DECLARE ... NO SCROLL CURSOR WITHOUT HOLD for server cursor" $ do
       let q = do
@@ -291,7 +291,7 @@ spec = describe "Epic 10: Binary Cursor Streaming & Keyset Pagination" $ do
           cur = runTx (declareCursor "doc_cur" 500 q)
           declSql = T.unpack (renderDeclareCursor cur)
       declSql `shouldContain` "DECLARE \"doc_cur\" NO SCROLL CURSOR WITHOUT HOLD FOR SELECT"
-      declSql `shouldContain` "FROM \"documents\" AS \"documents_0\""
+      declSql `shouldContain` "FROM \"documents\" AS \"t0\""
 
     it "renders FETCH FORWARD batch_size FROM cursor" $ do
       let cur = Cursor "doc_cur" 500 "SELECT 1"
