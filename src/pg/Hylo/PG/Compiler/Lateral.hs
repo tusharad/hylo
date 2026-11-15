@@ -74,13 +74,13 @@ many childQuery = lateralSubqueriesDict (Proxy :: Proxy db) `seq` Query $ \s ->
           (l : ls) ->
             Just $
               foldl
-                (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+                (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast)
                 (FromTable (lbAlias l) (lbAlias l))
                 ls
         Just baseItem ->
           Just $
             foldl
-              (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+              (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast)
               baseItem
               (qsLaterals childSt)
       childFromSql = case mChildFromWithLaterals of
@@ -93,7 +93,7 @@ many childQuery = lateralSubqueriesDict (Proxy :: Proxy db) `seq` Query $ \s ->
            in " WHERE " <> renderExpr combined
       subquerySql = "SELECT " <> aggExpr <> childFromSql <> childWhereSql
       latAlias = "lat_" <> T.pack (show (qsNextLateral childSt))
-      latBinding = LateralBinding latAlias subquerySql
+      latBinding = LateralBinding latAlias subquerySql (Just (aggExpr, childSt))
       s' =
         s
           { qsNextScope = qsNextScope childSt

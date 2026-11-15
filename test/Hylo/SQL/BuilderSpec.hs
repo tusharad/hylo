@@ -29,6 +29,7 @@ import Data.Time (UTCTime (..), fromGregorian, secondsToDiffTime)
 import GHC.Generics (Generic)
 import Hylo.Core
 import Hylo.MySQL.Compiler (compileMySQLQuery)
+import Hylo.PG.Compiler.Lateral (NestedList (..), many)
 import Hylo.SQL
 import Test.Hspec
 import Test.QuickCheck
@@ -294,3 +295,58 @@ spec = describe "User Story 4: Parameterized Multi-Dialect SqlBuilder" $ do
           `shouldBe` [ BoundParam 1 "2026-11-15 20:00:00 UTC" "text"
                      , BoundParam 2 "42" "integer"
                      ]
+
+  describe
+    "User Story 9: Close LitExpr Injection Backdoor & Thread SqlBuilder Through IN, LATERAL, and CTEs"
+    $ do
+      it
+        "Acceptance Criterion 1: Passing lit \"(malicious)\" in a query binds \"(malicious)\" as parameter $1 instead of emitting raw SQL"
+        $ do
+          let q :: Query (Postgres 'PG17) (Col 'Expr Int64, Col 'Expr Text)
+              q = do
+                u <- each userTable
+                where_ (u.name ==. lit ("(malicious)" :: Text))
+                pure (u.id, u.name)
+              cq = compileQuery PostgresDialect q
+          compiledSQL cq
+            `shouldBe` "SELECT \"t0\".\"id\", \"t0\".\"name\" FROM \"users\" AS \"t0\" WHERE (\"t0\".\"name\" = $1)"
+          toList (compiledParams cq)
+            `shouldBe` [BoundParam 1 "(malicious)" "text"]
+
+      it
+        "Acceptance Criterion 2: A query combining a CTE, an outer where_, a many lateral subquery with a filter, and an in_ list numbers parameters sequentially ($1, $2, $3, ...) with zero collisions"
+        $ do
+          let q :: Query (Postgres 'PG17) (Col 'Expr Int64, NestedList (EmployeeT 'Expr))
+              q =
+                with
+                  "active_emps"
+                  ( do
+                      e <- each employeeTable
+                      where_ (e.age >=. lit (18 :: Int64))
+                      pure (e.id, e.name)
+                  )
+                  $ \_cte -> do
+                    u <- each userTable
+                    where_ (u.name /=. lit ("banned" :: Text))
+                    emps <- many $ do
+                      e <- each employeeTable
+                      where_ (e.age ==. u.id &&. e.age <. lit (65 :: Int64))
+                      pure e
+                    where_ (in_ u.id [10 :: Int64, 20 :: Int64])
+                    pure (u.id, emps)
+              cq = compileQuery PostgresDialect q
+              sql = T.unpack (compiledSQL cq)
+              params = toList (compiledParams cq)
+          sql `shouldContain` "WITH \"active_emps\" AS ("
+          sql `shouldContain` "WHERE (\"employees_0\".\"age\" >= $1)"
+          sql `shouldContain` "LEFT JOIN LATERAL ("
+          sql `shouldContain` "(\"employees_2\".\"age\" < $2)"
+          sql `shouldContain` "WHERE (\"t0\".\"name\" <> $3) AND (\"t0\".\"id\" IN ($4, $5))"
+          map paramIndex params `shouldBe` [1, 2, 3, 4, 5]
+          params
+            `shouldBe` [ BoundParam 1 "18" "integer"
+                       , BoundParam 2 "65" "integer"
+                       , BoundParam 3 "banned" "text"
+                       , BoundParam 4 "10" "integer"
+                       , BoundParam 5 "20" "integer"
+                       ]

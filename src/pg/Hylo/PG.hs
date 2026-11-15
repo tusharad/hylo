@@ -28,6 +28,7 @@ module Hylo.PG
   , module Hylo.PG.Vector
   , module Hylo.PG.Search.Hybrid
   , module Hylo.PG.Search.RRF
+  , module Hylo.PG.Features
   ) where
 
 import Hylo.PG.Codec.Binary
@@ -39,6 +40,7 @@ import Hylo.PG.Compiler.SQL
 import Hylo.PG.Compiler.Window
 import Hylo.PG.Connection
 import Hylo.PG.Error.Translation
+import Hylo.PG.Features
 import Hylo.PG.Hydration.Graph
 import Hylo.PG.Mutation.Bulk
 import Hylo.PG.Mutation.Changeset

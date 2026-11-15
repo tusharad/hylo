@@ -36,6 +36,8 @@ module Hylo.Core
   , (>=.)
   , (&&.)
   , (||.)
+  , in_
+  , notIn_
 
     -- * Closed Type Family Diagnostics (E001–E015)
   , AssertComparable (..)

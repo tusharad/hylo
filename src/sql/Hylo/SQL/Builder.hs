@@ -88,13 +88,17 @@ import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query.Monad (Query (..), QueryState (..), initialQueryState)
 import Hylo.Core.Transaction (BoundParam (..), mkBoundParam)
 import Hylo.SQL.AST
-  ( FromItem (..)
+  ( CTEBinding (..)
+  , CTEType (..)
+  , CycleClause (..)
+  , FromItem (..)
   , LateralBinding (..)
+  , Materialization (..)
   , Projectable (..)
+  , RelationBinding (..)
   , renderLockClause
   )
 import Hylo.SQL.Compiler.JoinFlattener (flattenJoins)
-import Hylo.SQL.Query.CTE (renderCTEs)
 
 --------------------------------------------------------------------------------
 -- 1. Dialects & Backend Markers
@@ -265,22 +269,19 @@ buildExpr d = \case
     "true" -> pure "TRUE"
     "false" -> pure "FALSE"
     "null" -> pure "NULL"
-    _ ->
-      if T.isPrefixOf "(" t && T.isSuffixOf ")" t
-        then pure (B.fromText t)
-        else do
-          st <- get
-          let nextIdx = sbsParamCount st + 1
-              val = cleanParamValue t
-              pType = inferParamType val
-              param = BoundParam nextIdx val pType
-              ph = bindPlaceholder d nextIdx
-          put
-            st
-              { sbsParamCount = nextIdx
-              , sbsParams = sbsParams st |> param
-              }
-          pure (B.fromText ph)
+    _ -> do
+      st <- get
+      let nextIdx = sbsParamCount st + 1
+          val = cleanParamValue t
+          pType = inferParamType val
+          param = BoundParam nextIdx val pType
+          ph = bindPlaceholder d nextIdx
+      put
+        st
+          { sbsParamCount = nextIdx
+          , sbsParams = sbsParams st |> param
+          }
+      pure (B.fromText ph)
   ColExpr rel col -> do
     mappedRel <- resolveRelationAlias rel
     pure (B.fromText (quoteScopedCol d mappedRel col))
@@ -339,6 +340,27 @@ buildExpr d = \case
       pure ph
     let rhs = "(" <> T.intercalate ", " phs <> ")"
     pure (B.fromText ("(" <> lhs <> " " <> op <> " " <> rhs <> ")"))
+  InListExpr isIn e items -> do
+    eB <- buildExpr d e
+    let op = if isIn then "IN" else "NOT IN"
+    if null items
+      then pure (if isIn then "(1 = 0)" else "(1 = 1)")
+      else do
+        phs <- forM items $ \item -> do
+          stCur <- get
+          let nextIdx = sbsParamCount stCur + 1
+              val = cleanParamValue item
+              pType = inferParamType val
+              param = BoundParam nextIdx val pType
+              ph = bindPlaceholder d nextIdx
+          put
+            stCur
+              { sbsParamCount = nextIdx
+              , sbsParams = sbsParams stCur |> param
+              }
+          pure ph
+        let rhs = "(" <> T.intercalate ", " phs <> ")"
+        pure ("(" <> eB <> " " <> B.fromText op <> " " <> B.fromText rhs <> ")")
 
 -- | Purely compile a standalone QExpr into SQL Text and accumulated parameters.
 compileExpr :: Dialect -> QExpr a -> (Text, Seq BoundParam)
@@ -368,14 +390,17 @@ buildFromItem d = \case
     rB <- buildFromItem d right
     condB <- buildExpr d onCond
     pure (lB <> " LEFT JOIN " <> rB <> " ON " <> condB)
-  LeftJoinLateral left subquerySql latAlias -> do
+  LeftJoinLateral left subquerySql latAlias mAST -> do
     lB <- buildFromItem d left
     mappedLat <- allocateScopeAlias latAlias
     let aQuoted = quoteIdentifier d mappedLat
+    subqueryB <- case mAST of
+      Just (aggExpr, childSt) -> buildLateralSubquery d aggExpr childSt
+      Nothing -> pure (B.fromText subquerySql)
     pure
       ( lB
           <> " LEFT JOIN LATERAL ("
-          <> B.fromText subquerySql
+          <> subqueryB
           <> ") AS "
           <> B.fromText aQuoted
           <> " ON TRUE"
@@ -439,6 +464,9 @@ compileQueryAST d rawProjections st =
 -- | Internal builder composing all SQL clauses with dialect quoting and scope mapping.
 buildQueryParts :: Dialect -> [Text] -> QueryState -> SqlBuilderM Builder
 buildQueryParts d rawProjections st = do
+  -- 0. CTE clause (compiled inside SqlBuilderM, sharing parameters!)
+  cteClause <- buildCTEs d (qsCTEs st)
+
   -- 1. Flatten joins and build FROM clause (this assigns t0, t1... in sbsAliasMap)
   let (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
 
@@ -447,10 +475,11 @@ buildQueryParts d rawProjections st = do
       [] -> pure Nothing
       (l : ls) -> do
         let base = FromTable (lbAlias l) (lbAlias l)
-            item = foldl (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a) base ls
+            item = foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) base ls
         Just <$> buildFromItem d item
     Just baseItem -> do
-      let withLats = foldl (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a) baseItem (qsLaterals st)
+      let withLats =
+            foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) baseItem (qsLaterals st)
       Just <$> buildFromItem d withLats
 
   -- 2. Build Projections (rewriting column aliases to t0, t1... and applying dialect quoting)
@@ -515,10 +544,7 @@ buildQueryParts d rawProjections st = do
                 Just n -> " OFFSET " <> B.fromText (T.pack (show n))
            in limitClause <> offsetClause
 
-  -- 8. CTE clause
-  let cteClause = if null (qsCTEs st) then "" else B.fromText (renderCTEs (qsCTEs st))
-
-  -- 9. Lock clause
+  -- 8. Lock clause
   let lockClause = case qsLock st of
         Nothing -> ""
         Just lk -> " " <> B.fromText (renderLockClause lk)
@@ -533,6 +559,177 @@ buildQueryParts d rawProjections st = do
         <> orderByClause
         <> limitOffsetClause
         <> lockClause
+    )
+
+-- | Build a correlated LATERAL subquery inside SqlBuilderM, sharing parameters and scopes.
+buildLateralSubquery :: Dialect -> Text -> QueryState -> SqlBuilderM Builder
+buildLateralSubquery d aggExpr childSt = do
+  builderSt <- get
+  let childRelAliases = [rbAlias r | r <- qsRelations childSt]
+      childAliasMap = foldr (\a m -> Map.insert a a m) (sbsAliasMap builderSt) childRelAliases
+  put builderSt {sbsAliasMap = childAliasMap}
+
+  let (mFrom, wherePreds) = flattenJoins (qsRelations childSt) (qsPredicates childSt)
+
+  mFromB <- case mFrom of
+    Nothing -> case qsLaterals childSt of
+      [] -> pure Nothing
+      (l : ls) -> do
+        let base = FromTable (lbAlias l) (lbAlias l)
+            item = foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) base ls
+        Just <$> buildFromItem d item
+    Just baseItem -> do
+      let withLats =
+            foldl
+              (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast)
+              baseItem
+              (qsLaterals childSt)
+      Just <$> buildFromItem d withLats
+
+  whereClause <- case wherePreds of
+    [] -> pure ""
+    ps -> do
+      condBuilders <- mapM (buildExpr d) ps
+      let combined = case condBuilders of
+            [] -> ""
+            [c] -> c
+            (c : cs) -> foldl (\acc next -> acc <> " AND " <> next) c cs
+      pure (" WHERE " <> combined)
+
+  let fromClause = case mFromB of
+        Nothing -> ""
+        Just fb -> " FROM " <> fb
+
+  finalSt <- get
+  put finalSt {sbsAliasMap = sbsAliasMap builderSt}
+
+  pure ("SELECT " <> B.fromText aggExpr <> fromClause <> whereClause)
+
+-- | Compile a list of CTE bindings within SqlBuilderM, sharing parameter and scope counters.
+buildCTEs :: Dialect -> [CTEBinding] -> SqlBuilderM Builder
+buildCTEs _ [] = pure ""
+buildCTEs d ctes = do
+  let isRecursive = any isRec ctes
+      prefix = if isRecursive then "WITH RECURSIVE " else "WITH "
+  rendered <- forM ctes (buildCTEBinding d)
+  let joined = case rendered of
+        [] -> ""
+        [b] -> b
+        (b : bs) -> foldl (\acc next -> acc <> ",\n" <> next) b bs
+  pure (B.fromText prefix <> joined <> " ")
+  where
+    isRec (CTEBinding _ def) = case def of
+      RecursiveCTE {} -> True
+      _ -> False
+
+-- | Compile an individual CTE definition inside SqlBuilderM.
+buildCTEBinding :: Dialect -> CTEBinding -> SqlBuilderM Builder
+buildCTEBinding d (CTEBinding _ def) = case def of
+  NonRecursiveCTE mat name fallbackSql mAST -> do
+    let matStr = case mat of
+          DefaultMaterialization -> ""
+          Materialized -> "MATERIALIZED "
+          NotMaterialized -> "NOT MATERIALIZED "
+    bodyB <- case mAST of
+      Just (projs, cteSt) -> buildCTEQueryParts d projs cteSt
+      Nothing -> pure (B.fromText fallbackSql)
+    pure ("\"" <> B.fromText name <> "\" AS " <> B.fromText matStr <> "(\n  " <> bodyB <> "\n)")
+  RecursiveCTE name baseFallbackSql recFallbackSql mCycle mAST -> do
+    let cycleStr = case mCycle of
+          Nothing -> ""
+          Just (CycleClause c s u) ->
+            " CYCLE \"" <> c <> "\" SET \"" <> s <> "\" USING \"" <> u <> "\""
+    (baseB, recB) <- case mAST of
+      Just ((baseProjs, baseSt), (recProjs, recSt)) -> do
+        bB <- buildCTEQueryParts d baseProjs baseSt
+        rB <- buildCTEQueryParts d recProjs recSt
+        pure (bB, rB)
+      Nothing ->
+        pure (B.fromText baseFallbackSql, B.fromText recFallbackSql)
+    pure
+      ( "\""
+          <> B.fromText name
+          <> "\" AS (\n  "
+          <> baseB
+          <> "\n  UNION ALL\n  "
+          <> recB
+          <> "\n)"
+          <> B.fromText cycleStr
+      )
+
+-- | Compile inner query parts of a CTE definition inside SqlBuilderM.
+buildCTEQueryParts :: Dialect -> [Text] -> QueryState -> SqlBuilderM Builder
+buildCTEQueryParts d rawProjections st = do
+  builderSt <- get
+  let relAliases = [rbAlias r | r <- qsRelations st]
+      cteAliasMap = foldr (\a m -> Map.insert a a m) (sbsAliasMap builderSt) relAliases
+  put builderSt {sbsAliasMap = cteAliasMap}
+
+  let (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
+
+  mFromB <- case mFrom of
+    Nothing -> case qsLaterals st of
+      [] -> pure Nothing
+      (l : ls) -> do
+        let base = FromTable (lbAlias l) (lbAlias l)
+            item = foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) base ls
+        Just <$> buildFromItem d item
+    Just baseItem -> do
+      let withLats =
+            foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) baseItem (qsLaterals st)
+      Just <$> buildFromItem d withLats
+
+  bSt <- get
+  let projTexts = map (rewriteProjection d (sbsAliasMap bSt)) rawProjections
+      selectClause =
+        "SELECT " <> B.fromText (if null projTexts then "1" else T.intercalate ", " projTexts)
+
+  let fromClause = case mFromB of
+        Nothing -> ""
+        Just fb -> " FROM " <> fb
+
+  whereClause <- case wherePreds of
+    [] -> pure ""
+    ps -> do
+      condBuilders <- mapM (buildExpr d) ps
+      let combined = case condBuilders of
+            [] -> ""
+            [c] -> c
+            (c : cs) -> foldl (\acc next -> acc <> " AND " <> next) c cs
+      pure (" WHERE " <> combined)
+
+  let groupByClause = case qsGroupBy st of
+        [] -> ""
+        cols ->
+          let rewrittenCols = map (rewriteProjection d (sbsAliasMap bSt)) cols
+           in " GROUP BY " <> B.fromText (T.intercalate ", " rewrittenCols)
+
+  havingClause <- case qsHaving st of
+    [] -> pure ""
+    hs -> do
+      hBuilders <- mapM (buildExpr d) hs
+      let combined = case hBuilders of
+            [] -> ""
+            [h] -> h
+            (h : cs) -> foldl (\acc next -> acc <> " AND " <> next) h cs
+      pure (" HAVING " <> combined)
+
+  let orderByClause = case qsOrderBy st of
+        [] -> ""
+        orders ->
+          let rewrittenOrders = map (rewriteProjection d (sbsAliasMap bSt)) orders
+           in " ORDER BY " <> B.fromText (T.intercalate ", " rewrittenOrders)
+
+  finalSt <- get
+  put finalSt {sbsAliasMap = sbsAliasMap builderSt}
+
+  pure
+    ( selectClause
+        <> fromClause
+        <> whereClause
+        <> groupByClause
+        <> havingClause
+        <> orderByClause
     )
 
 -- | Generate a debug/preview SQL string by interpolating bound parameters into the compiled query.

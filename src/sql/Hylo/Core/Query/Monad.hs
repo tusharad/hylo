@@ -31,41 +31,12 @@ import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr)
 import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.SQL.AST
-  ( CTEBinding (..)
-  , LateralBinding (..)
-  , LockClause (..)
+  ( QueryState (..)
   , RelationBinding (..)
   , ScopeId (..)
   , formatScope
+  , initialQueryState
   )
-
--- | Internal state tracked during Query monadic composition.
-data QueryState = QueryState
-  { qsNextScope :: !Int
-  , qsNextLateral :: !Int
-  , qsRelations :: ![RelationBinding]
-  , qsPredicates :: ![QExpr Bool]
-  , qsLaterals :: ![LateralBinding]
-  , qsGroupBy :: ![Text]
-  , qsHaving :: ![QExpr Bool]
-  , qsOrderBy :: ![Text]
-  , qsCTEs :: ![CTEBinding]
-  , qsLimit :: !(Maybe Int)
-  , qsOffset :: !(Maybe Int)
-  , qsLock :: !(Maybe LockClause)
-  , qsUpsert :: !(Maybe Text)
-  , qsCustomQuery :: !(Maybe Text)
-  }
-  deriving (Eq, Show)
-
-instance NFData QueryState where
-  rnf (QueryState n l r p lat gb hv ob ctes lim off lk up cq) =
-    rnf (n, l, r, p, lat, gb, hv) `seq`
-      rnf (ob, ctes, lim, off, lk, up, cq)
-
--- | Default initial state for a new Query computation.
-initialQueryState :: QueryState
-initialQueryState = QueryState 0 0 [] [] [] [] [] [] [] Nothing Nothing Nothing Nothing Nothing
 
 -- | Pure operational Query monad parameterised by database backend marker.
 newtype Query db a = Query
