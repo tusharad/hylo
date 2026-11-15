@@ -322,6 +322,19 @@ All agents and contributors working on this codebase MUST follow this branching 
    Writing multiline chained `$` applications across nested data constructors (e.g. `Just $ ProjectStage $ object $ ...`) produces different indentation layouts between Fourmolu 0.21.x (local environment) and Fourmolu 0.17.x (GitHub Actions CI runner), causing CI format checks to fail.
    * **Rule:** Avoid multiline chained `$` operators across nested constructor invocations. Use standard function application with explicit parentheses or `let` bindings (`let projectFields = ... in Just (ProjectStage (object projectFields))`) to guarantee 100% byte-for-byte formatting idempotence across all Fourmolu toolchain versions.
 
+60. **Hasql `SessionError` Constructor and Component Types:**
+   In Hasql, `QueryError` is a data constructor of the type `Hasql.Session.SessionError`, not the type name. Attempting `translateHasqlError :: Sess.QueryError -> TxError` fails with `[GHC-83865] Expecting three more arguments to 'Sess.QueryError'. Expected a type, but 'Sess.QueryError' has kind 'ByteString -> [Text] -> CommandError -> SessionError'`. Furthermore, `SessionError` includes `PipelineError PipelineError` which must be matched to prevent incomplete-pattern warnings.
+   * **Rule:** When capturing or translating errors returned by Hasql sessions (`Hasql.Session.run`), type the error parameter as `Hasql.Session.SessionError` and pattern match both `QueryError _ _ cmdErr` and `PipelineError pipErr`.
+
+61. **`TxConstraintViolation` Field Order in Pattern Matching:**
+   `data TxError = TxConstraintViolation !Text !Text !Text` stores `sqlState` (e.g. `"23505"`), `message` (e.g. `"duplicate key value violates unique constraint \"test_unique_key\""`), and `detail` (e.g. `"Key (code)=(ALPHA) already exists."`). Pattern-matching `Left (TxConstraintViolation code _ msg)` erroneously binds `msg` to `detail` rather than `message`, causing substring checks on constraint names to fail.
+   * **Rule:** When asserting or matching against `TxConstraintViolation`, name fields explicitly as `Left (TxConstraintViolation code message detail)` and check constraint names against `message`.
+
+62. **Pure Evaluation vs Real Database Failure in `withSavepoint`:**
+   In Hylo's pure transaction monad, `recordMutation sql` merely records an operation descriptor in memory; it does not evaluate or throw a SQL error during pure `executeTx`. For `withSavepoint` to trigger `OpRollbackSavepoint`, the sub-transaction computation must evaluate to `Left err` (e.g. via `txFail` or a changeset constraint check).
+   * **Rule:** When testing transactional savepoint isolation, explicitly abort or fail the sub-transaction using `txFail (TxUserError ...)` so `withSavepoint` records `OpRollbackSavepoint`, allowing the real database runner to emit `ROLLBACK TO SAVEPOINT` and successfully commit the parent transaction.
+
+
 
 
 
