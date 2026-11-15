@@ -5,6 +5,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -28,6 +29,7 @@ module Hylo.PG.Mutation.Upsert
 
     -- * Assignment & Conflict Actions
   , Assignment (..)
+  , pattern Assignment
   , Assignable (..)
   , (=:)
   , ConflictAction (..)
@@ -42,6 +44,7 @@ module Hylo.PG.Mutation.Upsert
   , insertOnConflict
   , insertOnConflictDoNothing
   , renderUpsertSQL
+  , renderUpsertSQLText
   , renderAssignment
 
     -- * Transactional Guarded Upsert
@@ -49,17 +52,35 @@ module Hylo.PG.Mutation.Upsert
   ) where
 
 import Control.DeepSeq (NFData (..))
+import Data.Foldable (toList)
 import Data.Kind (Type)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
+import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Lazy (toStrict)
+import Data.Text.Lazy.Builder (toLazyText)
 import Hylo.Core.Context (ColDef (..), ColSpec, Ctx (..))
 import Hylo.Core.Expr (QExpr (..), ToQExpr (..))
 import Hylo.Core.Query (Tx (..), TxMode (..))
 import Hylo.Core.Query.Monad (Query (..), QueryState (..))
 import Hylo.Core.Table (Table (..), TableSchema (..))
+import Hylo.Core.Transaction (BoundParam (..))
 import Hylo.Core.TypeError (AssertWritable (..))
 import Hylo.SQL.AST (Projectable (..), renderExpr)
+import Hylo.SQL.Builder
+  ( Dialect (PostgresDialect)
+  , SqlBuilderM
+  , SqlBuilderState (..)
+  , bindPlaceholder
+  , buildExpr
+  , cleanParamValue
+  , inferParamType
+  , initialBuilderState
+  , runSqlBuilderWithState
+  )
 
 -- | Conflict target specification for PostgreSQL ON CONFLICT clause.
 data ConflictTarget
@@ -86,15 +107,38 @@ onColumns = OnColumns
 onConflictDoNothing :: ConflictTarget
 onConflictDoNothing = OnConflictDoNothing
 
+-- | Existential wrapper for a 'QExpr' of any underlying type.
+data SomeExpr where
+  SomeExpr :: !(QExpr a) -> SomeExpr
+
+instance Show SomeExpr where
+  show (SomeExpr e) = show e
+
+instance NFData SomeExpr where
+  rnf (SomeExpr e) = rnf e
+
 -- | Single field assignment within an UPDATE SET clause.
-data Assignment = Assignment
+data Assignment = AssignmentInternal
   { assignColumn :: !Text
   , assignValue :: !Text
+  , assignExpr :: !(Maybe SomeExpr)
   }
-  deriving (Eq, Show)
+
+pattern Assignment :: Text -> Text -> Assignment
+pattern Assignment col val <- AssignmentInternal col val _
+  where
+    Assignment col val = AssignmentInternal col val Nothing
+
+{-# COMPLETE Assignment #-}
+
+instance Eq Assignment where
+  (AssignmentInternal c1 v1 _) == (AssignmentInternal c2 v2 _) = c1 == c2 && v1 == v2
+
+instance Show Assignment where
+  show (AssignmentInternal c v _) = "Assignment " ++ show c ++ " " ++ show v
 
 instance NFData Assignment where
-  rnf (Assignment c v) = rnf c `seq` rnf v
+  rnf (AssignmentInternal c v e) = rnf c `seq` rnf v `seq` rnf e
 
 -- | Class of types whose column name can be determined for an assignment target.
 class Assignable target a | target -> a where
@@ -112,7 +156,9 @@ infix 4 =:
 
 -- | Construct a column assignment from an assignable target and a value expression.
 (=:) :: (Assignable target a, ToQExpr val a) => target -> val -> Assignment
-(=:) target val = Assignment (targetColumnName target) (renderExpr (toQExpr val))
+(=:) target val =
+  let qe = toQExpr val
+   in AssignmentInternal (targetColumnName target) (renderExpr qe) (Just (SomeExpr qe))
 
 -- | Conflict resolution action on constraint violation.
 data ConflictAction
@@ -179,7 +225,8 @@ insertOnConflict schema row target updateFn =
           , uaAction = action
           }
    in Query $ \s ->
-        let s' = s {qsUpsert = Just (renderUpsertSQL act)}
+        let (upsertSql, params) = renderUpsertSQL act
+            s' = s {qsUpsert = Just (upsertSql, params)}
          in (act, s')
 
 -- | Construct an upsert action that performs DO NOTHING on conflict.
@@ -194,32 +241,87 @@ insertOnConflictDoNothing schema row target =
 
 -- | Render an Assignment into SQL text: @"column" = value@.
 renderAssignment :: Assignment -> Text
-renderAssignment (Assignment col val) = "\"" <> col <> "\" = " <> val
+renderAssignment (AssignmentInternal col val _) = "\"" <> col <> "\" = " <> val
 
--- | Render a full UpsertAction into PostgreSQL SQL text.
-renderUpsertSQL :: UpsertAction table -> Text
+-- | Clean single or double surrounding quotes from a raw value string.
+cleanVal :: Text -> Text
+cleanVal t = case T.uncons (cleanParamValue t) of
+  Just ('\'', rest) -> case T.unsnoc rest of
+    Just (middle, '\'') -> middle
+    _ -> cleanParamValue t
+  _ -> cleanParamValue t
+
+-- | Render a full UpsertAction into PostgreSQL SQL text and bound parameters.
+renderUpsertSQL :: (Table table) => UpsertAction table -> (Text, [BoundParam])
 renderUpsertSQL (UpsertAction schema kvs target action) =
   let tbl = "\"" <> tableName schema <> "\""
+      colDefs = tableColDefs (tableMeta schema)
+      colTypeMap = Map.fromList [(colName c, colSqlType c) | c <- colDefs]
+
+      -- 1. Parameterize inserted row values
+      (valPlaceholders, insertParams) =
+        foldl
+          ( \(phs, ps) (col, rawVal) ->
+              let clean = cleanVal rawVal
+                  isDefault = T.toUpper (T.strip clean) == "DEFAULT"
+               in if isDefault
+                    then (phs ++ ["DEFAULT"], ps)
+                    else
+                      let nextIdx = length ps + 1
+                          cType = fromMaybe (inferParamType clean) (Map.lookup col colTypeMap)
+                          p = BoundParam nextIdx clean cType
+                          ph = bindPlaceholder PostgresDialect nextIdx
+                       in (phs ++ [ph], ps ++ [p])
+          )
+          ([], [])
+          kvs
+
       insertPart = case kvs of
         [] -> "INSERT INTO " <> tbl <> " DEFAULT VALUES"
         _ ->
           let cols = T.intercalate ", " (map (\(c, _) -> "\"" <> c <> "\"") kvs)
-              vals = T.intercalate ", " (map snd kvs)
+              vals = T.intercalate ", " valPlaceholders
            in "INSERT INTO " <> tbl <> " (" <> cols <> ") VALUES (" <> vals <> ")"
-      conflictPart = case target of
-        OnConflictDoNothing -> " ON CONFLICT DO NOTHING"
-        OnConstraint c -> " ON CONFLICT ON CONSTRAINT \"" <> c <> "\"" <> renderConflictAction action
+
+      -- 2. Parameterize DO UPDATE SET expressions
+      (conflictPart, allParams) = case target of
+        OnConflictDoNothing -> (" ON CONFLICT DO NOTHING", insertParams)
+        OnConstraint c ->
+          let (actSql, ps) = renderConflictAction action insertParams
+           in (" ON CONFLICT ON CONSTRAINT \"" <> c <> "\"" <> actSql, ps)
         OnColumns cs ->
           let cols = T.intercalate ", " (map (\c -> "\"" <> c <> "\"") cs)
-           in " ON CONFLICT (" <> cols <> ")" <> renderConflictAction action
-   in insertPart <> conflictPart
+              (actSql, ps) = renderConflictAction action insertParams
+           in (" ON CONFLICT (" <> cols <> ")" <> actSql, ps)
+   in (insertPart <> conflictPart, allParams)
 
-renderConflictAction :: ConflictAction -> Text
-renderConflictAction = \case
-  DoNothing -> " DO NOTHING"
-  DoUpdate [] -> " DO NOTHING"
-  DoUpdate assignments ->
-    " DO UPDATE SET " <> T.intercalate ", " (map renderAssignment assignments)
+-- | Render the conflict resolution action and accumulate parameters into the state.
+renderConflictAction :: ConflictAction -> [BoundParam] -> (Text, [BoundParam])
+renderConflictAction DoNothing ps = (" DO NOTHING", ps)
+renderConflictAction (DoUpdate []) ps = (" DO NOTHING", ps)
+renderConflictAction (DoUpdate assignments) initialParams =
+  let initSt =
+        (initialBuilderState PostgresDialect)
+          { sbsParamCount = length initialParams
+          , sbsParams = Seq.fromList initialParams
+          }
+      act = mapM buildAssignment assignments
+      (renderedAssignments, finalSt) = runSqlBuilderWithState initSt act
+      finalParams = toList (sbsParams finalSt)
+      sql = " DO UPDATE SET " <> T.intercalate ", " renderedAssignments
+   in (sql, finalParams)
+  where
+    buildAssignment :: Assignment -> SqlBuilderM Text
+    buildAssignment (AssignmentInternal col val mExpr) = case mExpr of
+      Just (SomeExpr qe) -> do
+        b <- buildExpr PostgresDialect qe
+        pure ("\"" <> col <> "\" = " <> toStrict (toLazyText b))
+      Nothing ->
+        pure ("\"" <> col <> "\" = " <> val)
+
+-- | Render a full UpsertAction into raw SQL text without bound parameters.
+renderUpsertSQLText :: (Table table) => UpsertAction table -> Text
+renderUpsertSQLText = fst . renderUpsertSQL
 
 -- | Statically guarded transactional upsert. Fails with [Hylo Error E005] in ReadOnly mode.
 upsert ::
