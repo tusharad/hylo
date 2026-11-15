@@ -444,9 +444,9 @@ mergeInto ::
   Text ->
   Tx (Postgres v) mode ()
 mergeInto rawSql =
-  writableDict (Proxy :: Proxy mode)
-    `seq` pgMinVersionDict (Proxy @v) (Proxy @'PG15) (Proxy @"MERGE INTO")
-    `seq` recordMutation ("MERGE INTO " <> rawSql)
+  case writableDict (Proxy :: Proxy mode) of
+    () -> case pgMinVersionDict (Proxy @v) (Proxy @'PG15) (Proxy @"MERGE INTO") of
+      () -> recordMutation ("MERGE INTO " <> rawSql)
 
 -- | MERGE ... RETURNING statement (requires PostgreSQL 17+).
 mergeReturning ::
@@ -455,9 +455,9 @@ mergeReturning ::
   Text ->
   Tx (Postgres v) mode ()
 mergeReturning rawSql =
-  writableDict (Proxy :: Proxy mode)
-    `seq` pgMinVersionDict (Proxy @v) (Proxy @'PG17) (Proxy @"MERGE ... RETURNING")
-    `seq` recordMutation ("MERGE ... RETURNING " <> rawSql)
+  case writableDict (Proxy :: Proxy mode) of
+    () -> case pgMinVersionDict (Proxy @v) (Proxy @'PG17) (Proxy @"MERGE ... RETURNING") of
+      () -> recordMutation ("MERGE ... RETURNING " <> rawSql)
 
 -- | RETURNING WITH (OLD AS old, NEW AS new) clause (requires PostgreSQL 18+).
 returningWithOldNew ::
@@ -466,9 +466,9 @@ returningWithOldNew ::
   Text ->
   Tx (Postgres v) mode ()
 returningWithOldNew rawSql =
-  writableDict (Proxy :: Proxy mode)
-    `seq` pgMinVersionDict (Proxy @v) (Proxy @'PG18) (Proxy @"RETURNING WITH (OLD AS old, NEW AS new)")
-    `seq` recordMutation ("RETURNING WITH (OLD AS old, NEW AS new) " <> rawSql)
+  case writableDict (Proxy :: Proxy mode) of
+    () -> case pgMinVersionDict (Proxy @v) (Proxy @'PG18) (Proxy @"RETURNING WITH (OLD AS old, NEW AS new)") of
+      () -> recordMutation ("RETURNING WITH (OLD AS old, NEW AS new) " <> rawSql)
 
 -- | Server-side uuidv7() SQL expression (requires PostgreSQL 18+).
 uuidv7 ::
