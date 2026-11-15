@@ -73,6 +73,7 @@ module Hylo.PG.Codec.Binary
   , jsonCol
   , embeddingCol
   , arrayCol
+  , rangeCol
   , idCol
 
     -- * PostgreSQL Type OIDs
@@ -153,6 +154,7 @@ import Hylo.Core.Codec
   )
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Key (Id)
+import Hylo.PG.Range (Range (..), rangeCodec)
 import Hylo.PG.Vector (Embedding (..), decodeBinaryVector, encodeBinaryVector)
 
 --------------------------------------------------------------------------------
@@ -511,6 +513,9 @@ embeddingCol = embeddingCodec
 
 arrayCol :: ValueCodec a -> ValueCodec [a]
 arrayCol = arrayCodec
+
+rangeCol :: ValueCodec a -> ValueCodec (Range a)
+rangeCol = rangeCodec
 
 idCol :: ValueCodec a -> ValueCodec (Id table a)
 idCol = idCodec

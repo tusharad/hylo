@@ -46,12 +46,14 @@ import Hylo.Core.Transaction (BoundParam (..))
 instance NFData (QExpr a) where
   rnf expr = case expr of
     LitExpr t -> rnf t
+    LitTypedExpr val ty -> rnf val `seq` rnf ty
     ColExpr r c -> rnf r `seq` rnf c
     BinOpExpr op l r -> rnf op `seq` rnf l `seq` rnf r
     UnaryOpExpr op e -> rnf op `seq` rnf e
     LiftNullableExpr e -> rnf e
     CoalesceExpr m dflt -> rnf m `seq` rnf dflt
     AggOpExpr fn arg mFilter -> rnf fn `seq` rnf arg `seq` rnf mFilter
+    Func2Expr fn a b -> rnf fn `seq` rnf a `seq` rnf b
     StringAggExpr arg delim mFilter -> rnf arg `seq` rnf delim `seq` rnf mFilter
     RowCmpExpr op cols aliases vals n ->
       rnf op `seq` rnf cols `seq` rnf aliases `seq` rnf vals `seq` rnf n
@@ -253,6 +255,7 @@ renderExpr = \case
     "true" -> "TRUE"
     "false" -> "FALSE"
     _ -> t
+  LitTypedExpr val _ -> val
   ColExpr rel col ->
     if T.null rel
       then "\"" <> col <> "\""
@@ -275,6 +278,8 @@ renderExpr = \case
      in case mFilter of
           Nothing -> base
           Just cond -> base <> " FILTER (WHERE " <> renderExpr cond <> ")"
+  Func2Expr fn a b ->
+    fn <> "(" <> renderExpr a <> ", " <> renderExpr b <> ")"
   StringAggExpr arg delim mFilter ->
     let base = "string_agg(" <> renderExpr arg <> ", " <> renderExpr delim <> ")"
      in case mFilter of
@@ -293,12 +298,14 @@ renderExpr = \case
 exprAliases :: QExpr a -> [Text]
 exprAliases = \case
   LitExpr _ -> []
+  LitTypedExpr _ _ -> []
   ColExpr rel _ -> [rel]
   BinOpExpr _ l r -> exprAliases l ++ exprAliases r
   UnaryOpExpr _ e -> exprAliases e
   LiftNullableExpr e -> exprAliases e
   CoalesceExpr m dflt -> exprAliases m ++ exprAliases dflt
   AggOpExpr _ arg mFilter -> exprAliases arg ++ maybe [] exprAliases mFilter
+  Func2Expr _ a b -> exprAliases a ++ exprAliases b
   StringAggExpr arg delim mFilter -> exprAliases arg ++ exprAliases delim ++ maybe [] exprAliases mFilter
   RowCmpExpr _ _ aliases _ _ -> aliases
   InListExpr _ e _ -> exprAliases e

@@ -90,6 +90,7 @@ import Hylo.PG.Connection
   , executePreparedQuery
   , executeSession
   , executeSql
+  , runExplain
   , runTx
   , selectRows
   , selectRowsTx
@@ -677,6 +678,77 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
             Right rs -> do
               length rs `shouldBe` 2
               map (.id) rs `shouldBe` [toId 10, toId 30]
+
+  it
+    "User Story 17 Acceptance Criterion: executes JSONB, Range, Array, Full-Text Search, and EXPLAIN queries against real PostgreSQL"
+    $ withTestPostgres
+    $ \p -> do
+      case poolActiveConnection p of
+        Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
+        Just _ -> do
+          -- Setup table with JSONB, int4range, text array, and text for FTS
+          _ <-
+            executeSql
+              p
+              "DROP TABLE IF EXISTS test_expression_algebra CASCADE; \
+              \CREATE TABLE test_expression_algebra ( \
+              \  id SERIAL PRIMARY KEY, \
+              \  info JSONB NOT NULL, \
+              \  period INT4RANGE NOT NULL, \
+              \  tags TEXT[] NOT NULL, \
+              \  content TEXT NOT NULL \
+              \); \
+              \INSERT INTO test_expression_algebra (info, period, tags, content) VALUES \
+              \  ('{\"dept\": \"engineering\", \"team\": \"core\"}', '[10, 50)', ARRAY['db', 'haskell', 'sql'], 'PostgreSQL provides robust ACID guarantees and rich extension ecosystem'), \
+              \  ('{\"dept\": \"marketing\", \"team\": \"growth\"}', '[40, 80)', ARRAY['marketing', 'analytics'], 'Analyzing customer engagement metrics with rapid iteration');"
+
+          -- 1. Test EXPLAIN ANALYZE via runExplain
+          let qExplain = each accountSchema
+          explainRes <- runExplain p True qExplain
+          case explainRes of
+            Left err -> expectationFailure ("Failed to execute runExplain: " ++ show err)
+            Right jsonPlan -> do
+              jsonPlan `shouldSatisfy` T.isInfixOf "Plan"
+
+          -- 2. Test JSONB @> queries
+          let jsonbStmt =
+                Stmt.Statement
+                  "SELECT id FROM test_expression_algebra WHERE info @> $1::jsonb;"
+                  (Enc.param (Enc.nonNullable Enc.text))
+                  (Dec.rowList (Dec.column (Dec.nonNullable Dec.int4)))
+                  False
+          jRes <- executeSession p (Sess.statement "{\"dept\": \"engineering\"}" jsonbStmt)
+          jRes `shouldBe` Right [1]
+
+          -- 3. Test Range && queries
+          let rangeStmt =
+                Stmt.Statement
+                  "SELECT id FROM test_expression_algebra WHERE period && $1::int4range;"
+                  (Enc.param (Enc.nonNullable Enc.text))
+                  (Dec.rowList (Dec.column (Dec.nonNullable Dec.int4)))
+                  False
+          rRes <- executeSession p (Sess.statement "[45, 60)" rangeStmt)
+          rRes `shouldBe` Right [1, 2]
+
+          -- 4. Test Array @> queries
+          let arrayStmt =
+                Stmt.Statement
+                  "SELECT id FROM test_expression_algebra WHERE tags @> $1::text[];"
+                  (Enc.param (Enc.nonNullable Enc.text))
+                  (Dec.rowList (Dec.column (Dec.nonNullable Dec.int4)))
+                  False
+          aRes <- executeSession p (Sess.statement "{haskell}" arrayStmt)
+          aRes `shouldBe` Right [1]
+
+          -- 5. Test Full-Text Search @@ queries
+          let ftsStmt =
+                Stmt.Statement
+                  "SELECT id FROM test_expression_algebra WHERE to_tsvector('english', content) @@ plainto_tsquery('english', $1);"
+                  (Enc.param (Enc.nonNullable Enc.text))
+                  (Dec.rowList (Dec.column (Dec.nonNullable Dec.int4)))
+                  False
+          ftsRes <- executeSession p (Sess.statement "PostgreSQL ACID" ftsStmt)
+          ftsRes `shouldBe` Right [1]
 
 -- -----------------------------------------------------------------------------
 -- User Story 12 Test Row Type & Codec

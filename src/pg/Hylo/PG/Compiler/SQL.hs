@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 {- |
 Module      : Hylo.PG.Compiler.SQL
 Description : High-level SQL code generator from operational Query AST
@@ -12,6 +14,8 @@ module Hylo.PG.Compiler.SQL
   , renderSQLText
   , renderPostgresSQL
   , previewPostgresSQL
+  , explainQuery
+  , previewExplainSQL
   ) where
 
 import Data.Sequence (Seq)
@@ -54,3 +58,17 @@ renderSQL q = fromString (T.unpack (renderPostgresSQL q))
 -- | Generate a debug/preview SQL string by interpolating bound parameters.
 previewPostgresSQL :: Projectable a => Query (Postgres v) a -> Text
 previewPostgresSQL = previewQuery . compilePostgresQuery
+
+-- | Compile a PostgreSQL query wrapped with EXPLAIN (FORMAT JSON) or EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON).
+explainQuery :: Projectable a => Bool -> Query (Postgres v) a -> CompiledQuery
+explainQuery analyze q =
+  let cq = compilePostgresQuery q
+      prefix =
+        if analyze
+          then "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "
+          else "EXPLAIN (FORMAT JSON) "
+   in cq {compiledSQL = prefix <> compiledSQL cq}
+
+-- | Generate a debug/preview EXPLAIN SQL string with interpolated bound parameters.
+previewExplainSQL :: Projectable a => Bool -> Query (Postgres v) a -> Text
+previewExplainSQL analyze q = previewQuery (explainQuery analyze q)

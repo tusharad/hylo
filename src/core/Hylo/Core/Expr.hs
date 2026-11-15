@@ -20,6 +20,8 @@ module Hylo.Core.Expr
   ( QExpr (..)
   , ToQExpr (..)
   , lit
+  , litTyped
+  , func2Expr
   , colExpr
   , just
   , isNull
@@ -55,12 +57,14 @@ instance ToQExpr (QExpr a) a where
 -- | Typed SQL AST expression representing an expression evaluating to type @a@.
 data QExpr (a :: Type) where
   LitExpr :: !Text -> QExpr a
+  LitTypedExpr :: !Text -> !Text -> QExpr a
   ColExpr :: !Text -> !Text -> QExpr a
   BinOpExpr :: !Text -> !(QExpr a) -> !(QExpr b) -> QExpr c
   UnaryOpExpr :: !Text -> !(QExpr a) -> QExpr b
   LiftNullableExpr :: !(QExpr a) -> QExpr (Maybe a)
   CoalesceExpr :: !(QExpr (Maybe a)) -> !(QExpr a) -> QExpr a
   AggOpExpr :: !Text -> !(QExpr a) -> !(Maybe (QExpr Bool)) -> QExpr b
+  Func2Expr :: !Text -> !(QExpr a) -> !(QExpr b) -> QExpr c
   StringAggExpr :: !(QExpr Text) -> !(QExpr Text) -> !(Maybe (QExpr Bool)) -> QExpr Text
   RowCmpExpr :: !Text -> ![Text] -> ![Text] -> ![Text] -> !Int -> QExpr Bool
   InListExpr :: !Bool -> !(QExpr a) -> ![Text] -> QExpr Bool
@@ -68,6 +72,12 @@ data QExpr (a :: Type) where
 instance Show (QExpr a) where
   showsPrec d expr = case expr of
     LitExpr t -> showParen (d > 10) $ showString "LitExpr " . shows t
+    LitTypedExpr val ty ->
+      showParen (d > 10) $
+        showString "LitTypedExpr "
+          . shows val
+          . showString " "
+          . shows ty
     ColExpr r c -> showParen (d > 10) $ showString "ColExpr " . shows r . showString " " . shows c
     BinOpExpr op l r ->
       showParen (d > 10) $
@@ -100,6 +110,14 @@ instance Show (QExpr a) where
           . shows arg
           . showString " "
           . shows mFilter
+    Func2Expr fn a b ->
+      showParen (d > 10) $
+        showString "Func2Expr "
+          . shows fn
+          . showString " "
+          . shows a
+          . showString " "
+          . shows b
     StringAggExpr arg delim mFilter ->
       showParen (d > 10) $
         showString "StringAggExpr "
@@ -131,6 +149,7 @@ instance Show (QExpr a) where
 
 instance Eq (QExpr a) where
   LitExpr t1 == LitExpr t2 = t1 == t2
+  LitTypedExpr v1 t1 == LitTypedExpr v2 t2 = v1 == v2 && t1 == t2
   ColExpr r1 c1 == ColExpr r2 c2 = r1 == r2 && c1 == c2
   BinOpExpr o1 l1 r1 == BinOpExpr o2 l2 r2 =
     o1 == o2 && show l1 == show l2 && show r1 == show r2
@@ -140,6 +159,8 @@ instance Eq (QExpr a) where
     show m1 == show m2 && show d1 == show d2
   AggOpExpr f1 a1 m1 == AggOpExpr f2 a2 m2 =
     f1 == f2 && show a1 == show a2 && show m1 == show m2
+  Func2Expr f1 a1 b1 == Func2Expr f2 a2 b2 =
+    f1 == f2 && show a1 == show a2 && show b1 == show b2
   StringAggExpr a1 d1 m1 == StringAggExpr a2 d2 m2 =
     show a1 == show a2 && show d1 == show d2 && show m1 == show m2
   RowCmpExpr o1 c1 a1 v1 n1 == RowCmpExpr o2 c2 a2 v2 n2 =
@@ -151,6 +172,14 @@ instance Eq (QExpr a) where
 -- | Construct a literal expression from any Show-able value.
 lit :: Show a => a -> QExpr a
 lit v = LitExpr (T.pack (show v))
+
+-- | Construct an explicitly typed literal expression with a PostgreSQL logical type.
+litTyped :: Text -> Text -> QExpr a
+litTyped = LitTypedExpr
+
+-- | Construct a two-argument function expression.
+func2Expr :: Text -> QExpr a -> QExpr b -> QExpr c
+func2Expr = Func2Expr
 
 -- | Construct a scoped column expression from table alias and column name.
 colExpr :: Text -> Text -> QExpr a
