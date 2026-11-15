@@ -338,13 +338,13 @@ renderQueryInner res st =
                   (l : ls) ->
                     Just $
                       foldl
-                        (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+                        (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast)
                         (FromTable (lbAlias l) (lbAlias l))
                         ls
                 Just baseItem ->
                   Just $
                     foldl
-                      (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
+                      (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast)
                       baseItem
                       (qsLaterals st)
               fromClause = case mFromWithLaterals of
@@ -391,7 +391,8 @@ withMaterialized mat name cteQuery mainQuery = Query $ \s ->
   let cteRef = mkCTERef @ret name
       (cteRes, cteSt) = runQuery cteQuery (initialQueryState {qsNextScope = qsNextScope s})
       cteSql = renderQueryInner cteRes cteSt
-      binding = CTEBinding name (NonRecursiveCTE mat name cteSql)
+      cteProjs = projectColumns cteRes
+      binding = CTEBinding name (NonRecursiveCTE mat name cteSql (Just (cteProjs, cteSt)))
       mainStInit =
         s
           { qsNextScope = qsNextScope cteSt
@@ -426,9 +427,14 @@ withRecursiveCycle name mCycle baseCase recCase mainQuery = Query $ \s ->
   let cteRef = mkCTERef @ret name
       (baseRes, baseSt) = runQuery (baseCase cteRef) (initialQueryState {qsNextScope = qsNextScope s})
       baseSql = renderQueryInner baseRes baseSt
+      baseProjs = projectColumns baseRes
       (recRes, recSt) = runQuery (recCase cteRef) (initialQueryState {qsNextScope = qsNextScope baseSt})
       recSql = renderQueryInner recRes recSt
-      binding = CTEBinding name (RecursiveCTE name baseSql recSql mCycle)
+      recProjs = projectColumns recRes
+      binding =
+        CTEBinding
+          name
+          (RecursiveCTE name baseSql recSql mCycle (Just ((baseProjs, baseSt), (recProjs, recSt))))
       mainStInit =
         s
           { qsNextScope = qsNextScope recSt
@@ -452,13 +458,13 @@ renderCTEs = \case
 
 -- | Render an individual CTE definition.
 renderCTEBinding :: CTEBinding -> Text
-renderCTEBinding (CTEBinding _ (NonRecursiveCTE mat name sql)) =
+renderCTEBinding (CTEBinding _ (NonRecursiveCTE mat name sql _)) =
   let matStr = case mat of
         DefaultMaterialization -> ""
         Materialized -> "MATERIALIZED "
         NotMaterialized -> "NOT MATERIALIZED "
    in "\"" <> name <> "\" AS " <> matStr <> "(\n  " <> sql <> "\n)"
-renderCTEBinding (CTEBinding _ (RecursiveCTE name baseSql recSql mCycle)) =
+renderCTEBinding (CTEBinding _ (RecursiveCTE name baseSql recSql mCycle _)) =
   let cycleStr = case mCycle of
         Nothing -> ""
         Just (CycleClause c s u) ->

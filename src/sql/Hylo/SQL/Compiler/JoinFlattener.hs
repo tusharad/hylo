@@ -70,7 +70,7 @@ renderFromItem = \case
       <> renderFromItem right
       <> " ON "
       <> renderExpr onCond
-  LeftJoinLateral left subquerySql latAlias ->
+  LeftJoinLateral left subquerySql latAlias _ ->
     renderFromItem left
       <> " LEFT JOIN LATERAL ("
       <> subquerySql

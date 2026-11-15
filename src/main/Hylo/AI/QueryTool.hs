@@ -224,15 +224,13 @@ parseOperator alias sqlCol (opKey, opVal) =
           _ -> Left (InvalidValueError "$isNull requires a boolean value")
         "$in" -> case opVal of
           Aeson.Array arr -> do
-            rendered <- mapM valueToLiteralText (toList arr)
-            let inList = "(" <> T.intercalate ", " rendered <> ")"
-            Right (BinOpExpr "IN" targetCol (LitExpr inList))
+            items <- mapM valueToParamText (toList arr)
+            Right (InListExpr True targetCol items)
           _ -> Left (InvalidValueError "$in requires an array of scalar values")
         "$nin" -> case opVal of
           Aeson.Array arr -> do
-            rendered <- mapM valueToLiteralText (toList arr)
-            let inList = "(" <> T.intercalate ", " rendered <> ")"
-            Right (BinOpExpr "NOT IN" targetCol (LitExpr inList))
+            items <- mapM valueToParamText (toList arr)
+            Right (InListExpr False targetCol items)
           _ -> Left (InvalidValueError "$nin requires an array of scalar values")
         _ -> Left (InvalidOperatorError opText)
 
@@ -246,18 +244,14 @@ valueToExpr = \case
   Aeson.Array _ -> Left (InvalidValueError "Nested array cannot be parsed as scalar value")
   Aeson.Object _ -> Left (InvalidValueError "Nested object cannot be parsed as scalar value")
 
--- | Render a JSON primitive as a SQL literal string for IN clauses.
-valueToLiteralText :: Aeson.Value -> Either QueryToolError Text
-valueToLiteralText = \case
-  Aeson.String s -> Right ("'" <> escapeSqlString s <> "'")
+-- | Extract scalar parameter text from a JSON primitive for IN clauses.
+valueToParamText :: Aeson.Value -> Either QueryToolError Text
+valueToParamText = \case
+  Aeson.String s -> Right s
   Aeson.Number n -> Right (renderNumber n)
   Aeson.Bool b -> Right (if b then "TRUE" else "FALSE")
   Aeson.Null -> Right "NULL"
   _ -> Left (InvalidValueError "Only scalar primitives allowed in $in list")
-
--- | Escape single quotes for SQL string literals.
-escapeSqlString :: Text -> Text
-escapeSqlString = T.replace "'" "''"
 
 -- | Render a scientific number cleanly as integer or decimal text.
 renderNumber :: Scientific -> Text

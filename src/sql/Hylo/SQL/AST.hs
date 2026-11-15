@@ -27,6 +27,8 @@ module Hylo.SQL.AST
   , LockWait (..)
   , LockClause (..)
   , renderLockClause
+  , QueryState (..)
+  , initialQueryState
   , Projectable (..)
   , renderExpr
   , exprAliases
@@ -49,6 +51,8 @@ instance NFData (QExpr a) where
     StringAggExpr arg delim mFilter -> rnf arg `seq` rnf delim `seq` rnf mFilter
     RowCmpExpr op cols aliases vals n ->
       rnf op `seq` rnf cols `seq` rnf aliases `seq` rnf vals `seq` rnf n
+    InListExpr isIn e items ->
+      rnf isIn `seq` rnf e `seq` rnf items
 
 -- | Deterministic, collision-free relation scope identifier.
 newtype ScopeId = ScopeId
@@ -82,11 +86,12 @@ instance NFData RelationBinding where
 data LateralBinding = LateralBinding
   { lbAlias :: !Text
   , lbSubquerySql :: !Text
+  , lbSubqueryAST :: !(Maybe (Text, QueryState))
   }
   deriving (Eq, Show)
 
 instance NFData LateralBinding where
-  rnf (LateralBinding a s) = rnf a `seq` rnf s
+  rnf (LateralBinding a s ast) = rnf a `seq` rnf s `seq` rnf ast
 
 -- | Common Table Expression materialization fence.
 data Materialization
@@ -111,13 +116,18 @@ instance NFData CycleClause where
 
 -- | Type of Common Table Expression.
 data CTEType
-  = NonRecursiveCTE !Materialization !Text !Text
-  | RecursiveCTE !Text !Text !Text !(Maybe CycleClause)
+  = NonRecursiveCTE !Materialization !Text !Text !(Maybe ([Text], QueryState))
+  | RecursiveCTE
+      !Text
+      !Text
+      !Text
+      !(Maybe CycleClause)
+      !(Maybe (([Text], QueryState), ([Text], QueryState)))
   deriving (Eq, Show)
 
 instance NFData CTEType where
-  rnf (NonRecursiveCTE m n q) = rnf m `seq` rnf n `seq` rnf q
-  rnf (RecursiveCTE n b r mc) = rnf n `seq` rnf b `seq` rnf r `seq` rnf mc
+  rnf (NonRecursiveCTE m n q ast) = rnf m `seq` rnf n `seq` rnf q `seq` rnf ast
+  rnf (RecursiveCTE n b r mc ast) = rnf n `seq` rnf b `seq` rnf r `seq` rnf mc `seq` rnf ast
 
 -- | Named CTE binding attached to query AST.
 data CTEBinding = CTEBinding
@@ -134,7 +144,7 @@ data FromItem
   = FromTable !Text !Text
   | InnerJoin !FromItem !FromItem !(QExpr Bool)
   | LeftJoin !FromItem !FromItem !(QExpr Bool)
-  | LeftJoinLateral !FromItem !Text !Text
+  | LeftJoinLateral !FromItem !Text !Text !(Maybe (Text, QueryState))
   | CrossJoin !FromItem !FromItem
   deriving (Eq, Show)
 
@@ -143,7 +153,7 @@ instance NFData FromItem where
     FromTable t a -> rnf t `seq` rnf a
     InnerJoin l r c -> rnf l `seq` rnf r `seq` rnf c
     LeftJoin l r c -> rnf l `seq` rnf r `seq` rnf c
-    LeftJoinLateral l s a -> rnf l `seq` rnf s `seq` rnf a
+    LeftJoinLateral l s a ast -> rnf l `seq` rnf s `seq` rnf a `seq` rnf ast
     CrossJoin l r -> rnf l `seq` rnf r
 
 -- | Pessimistic locking strength.
@@ -177,6 +187,34 @@ data LockClause = LockClause
 
 instance NFData LockClause where
   rnf (LockClause s w ts) = rnf s `seq` rnf w `seq` rnf ts
+
+-- | Internal state tracked during Query monadic composition.
+data QueryState = QueryState
+  { qsNextScope :: !Int
+  , qsNextLateral :: !Int
+  , qsRelations :: ![RelationBinding]
+  , qsPredicates :: ![QExpr Bool]
+  , qsLaterals :: ![LateralBinding]
+  , qsGroupBy :: ![Text]
+  , qsHaving :: ![QExpr Bool]
+  , qsOrderBy :: ![Text]
+  , qsCTEs :: ![CTEBinding]
+  , qsLimit :: !(Maybe Int)
+  , qsOffset :: !(Maybe Int)
+  , qsLock :: !(Maybe LockClause)
+  , qsUpsert :: !(Maybe Text)
+  , qsCustomQuery :: !(Maybe Text)
+  }
+  deriving (Eq, Show)
+
+instance NFData QueryState where
+  rnf (QueryState n l r p lat gb hv ob ctes lim off lk up cq) =
+    rnf (n, l, r, p, lat, gb, hv) `seq`
+      rnf (ob, ctes, lim, off, lk, up, cq)
+
+-- | Default initial state for a new Query computation.
+initialQueryState :: QueryState
+initialQueryState = QueryState 0 0 [] [] [] [] [] [] [] Nothing Nothing Nothing Nothing Nothing
 
 -- | Render a lock clause into SQL syntax.
 renderLockClause :: LockClause -> Text
@@ -233,6 +271,10 @@ renderExpr = \case
     let lhs = "(" <> T.intercalate ", " cols <> ")"
         rhs = "(" <> T.intercalate ", " ["$" <> T.pack (show i) | i <- [1 .. nParams]] <> ")"
      in "(" <> lhs <> " " <> op <> " " <> rhs <> ")"
+  InListExpr isIn e items ->
+    let op = if isIn then "IN" else "NOT IN"
+        rhs = "(" <> T.intercalate ", " items <> ")"
+     in "(" <> renderExpr e <> " " <> op <> " " <> rhs <> ")"
 
 -- | Extract all table relation aliases referenced in a QExpr expression.
 exprAliases :: QExpr a -> [Text]
@@ -246,6 +288,7 @@ exprAliases = \case
   AggOpExpr _ arg mFilter -> exprAliases arg ++ maybe [] exprAliases mFilter
   StringAggExpr arg delim mFilter -> exprAliases arg ++ exprAliases delim ++ maybe [] exprAliases mFilter
   RowCmpExpr _ _ aliases _ _ -> aliases
+  InListExpr _ e _ -> exprAliases e
 
 -- | Class of types that can be projected into SQL SELECT column lists.
 class Projectable a where

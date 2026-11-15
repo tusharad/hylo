@@ -77,6 +77,7 @@ import Hylo.Core.Transaction (Tx (..), executeTx, initialTxState, txOperations)
 import Hylo.Core.TypeError (TxMode (..))
 import qualified Hylo.MySQL as MySQL
 import qualified Hylo.PG as PG
+import Hylo.PG.Features
 import qualified Hylo.Redis as Redis
 import qualified Hylo.SQLite as SQLite
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)

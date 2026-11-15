@@ -34,6 +34,8 @@ module Hylo.Core.Expr
   , (>=.)
   , (&&.)
   , (||.)
+  , in_
+  , notIn_
   , AssertComparable
   ) where
 
@@ -61,6 +63,7 @@ data QExpr (a :: Type) where
   AggOpExpr :: !Text -> !(QExpr a) -> !(Maybe (QExpr Bool)) -> QExpr b
   StringAggExpr :: !(QExpr Text) -> !(QExpr Text) -> !(Maybe (QExpr Bool)) -> QExpr Text
   RowCmpExpr :: !Text -> ![Text] -> ![Text] -> ![Text] -> !Int -> QExpr Bool
+  InListExpr :: !Bool -> !(QExpr a) -> ![Text] -> QExpr Bool
 
 instance Show (QExpr a) where
   showsPrec d expr = case expr of
@@ -117,6 +120,14 @@ instance Show (QExpr a) where
           . shows vals
           . showString " "
           . shows n
+    InListExpr isIn e items ->
+      showParen (d > 10) $
+        showString "InListExpr "
+          . shows isIn
+          . showString " "
+          . shows e
+          . showString " "
+          . shows items
 
 instance Eq (QExpr a) where
   LitExpr t1 == LitExpr t2 = t1 == t2
@@ -133,6 +144,8 @@ instance Eq (QExpr a) where
     show a1 == show a2 && show d1 == show d2 && show m1 == show m2
   RowCmpExpr o1 c1 a1 v1 n1 == RowCmpExpr o2 c2 a2 v2 n2 =
     o1 == o2 && c1 == c2 && a1 == a2 && v1 == v2 && n1 == n2
+  InListExpr in1 e1 items1 == InListExpr in2 e2 items2 =
+    in1 == in2 && show e1 == show e2 && items1 == items2
   _ == _ = False
 
 -- | Construct a literal expression from any Show-able value.
@@ -238,3 +251,19 @@ infixr 3 &&.
 (||.) = BinOpExpr "OR"
 
 infixr 2 ||.
+
+-- | Typed SQL IN list inclusion operator (e.g. @where_ (in_ doc.title ["Draft", "Published"])@).
+in_ :: (ToQExpr e a, Show a) => e -> [a] -> QExpr Bool
+in_ e xs = InListExpr True (toQExpr e) (map (cleanShowVal . T.pack . show) xs)
+
+-- | Typed SQL NOT IN list exclusion operator.
+notIn_ :: (ToQExpr e a, Show a) => e -> [a] -> QExpr Bool
+notIn_ e xs = InListExpr False (toQExpr e) (map (cleanShowVal . T.pack . show) xs)
+
+-- | Helper stripping surrounding quotes from 'Show' output on string values.
+cleanShowVal :: Text -> Text
+cleanShowVal t = case T.uncons t of
+  Just ('"', rest) -> case T.unsnoc rest of
+    Just (middle, '"') -> middle
+    _ -> t
+  _ -> t

@@ -106,6 +106,7 @@ library hylo-pg
       Hylo.PG.Compiler.Window
       Hylo.PG.Connection
       Hylo.PG.Error.Translation
+      Hylo.PG.Features
       Hylo.PG.Hydration.Graph
       Hylo.PG.Mutation.Bulk
       Hylo.PG.Mutation.Changeset
