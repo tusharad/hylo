@@ -56,6 +56,8 @@ library
       Hylo.Migrate.Catalog.PG
       Hylo.Migrate.CodeGen
       Hylo.Migrate.Diff
+      Hylo.Migrate.Linter
+      Hylo.Migrate.Runner.Shadow
       Hylo.PG
       Hylo.PG.Codec.Binary
       Hylo.PG.Compiler.Aggregate
@@ -132,6 +134,7 @@ test-suite hylo-test
       Hylo.Core.TransactionSpec
       Hylo.Core.TypeErrorSpec
       Hylo.Migrate.DiffSpec
+      Hylo.Migrate.LinterSpec
       Hylo.PG.Compiler.AggregateSpec
       Hylo.PG.Compiler.CTESpec
       Hylo.PG.Compiler.JoinFlattenerSpec
@@ -148,6 +151,7 @@ test-suite hylo-test
       Test.Hylo.Core.TransactionSpec
       Test.Hylo.Core.TypeErrorSpec
       Test.Hylo.Migrate.DiffSpec
+      Test.Hylo.Migrate.LinterSpec
       Test.Hylo.PG.Compiler.AggregateSpec
       Test.Hylo.PG.Compiler.CTESpec
       Test.Hylo.PG.Compiler.JoinFlattenerSpec
