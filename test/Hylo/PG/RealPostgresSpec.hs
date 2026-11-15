@@ -25,6 +25,12 @@ import Hylo.PG.Connection
   , executeSql
   , runTx
   )
+import Hylo.PG.Transaction.Retry
+  ( IsolationLevel (..)
+  , defaultRetryPolicy
+  , runTxWithRetry
+  , simulateWriteConflictOnce
+  )
 import Hylo.Test.Docker (getTestPgVersion, withTestPostgres)
 import Test.Hspec
 
@@ -336,3 +342,33 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
           row2 `shouldBe` Right 2
           _ <- executeSql p "COMMIT;"
           pure ()
+
+  it
+    "User Story 8 Acceptance Criterion 2: runTxWithRetry executes BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE READ WRITE and replays on serialization failure"
+    $ withTestPostgres
+    $ \p -> do
+      case poolActiveConnection p of
+        Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
+        Just _ -> do
+          _ <-
+            executeSql
+              p
+              "DROP TABLE IF EXISTS test_retry_pool CASCADE; \
+              \CREATE TABLE test_retry_pool (id INT PRIMARY KEY, val TEXT);"
+
+          let tx = do
+                simulateWriteConflictOnce
+                recordMutation "INSERT INTO test_retry_pool VALUES (1, 'serializable_ok');"
+                pure ("committed_after_retry" :: Text)
+
+          res <- runTxWithRetry defaultRetryPolicy p Serializable tx
+          res `shouldBe` Right "committed_after_retry"
+
+          let checkStmt =
+                Stmt.Statement
+                  "SELECT val FROM test_retry_pool WHERE id = 1;"
+                  Enc.noParams
+                  (Dec.singleRow (Dec.column (Dec.nonNullable Dec.text)))
+                  False
+          qRes <- executeSession p (Sess.statement () checkStmt)
+          qRes `shouldBe` Right "serializable_ok"

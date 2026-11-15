@@ -19,6 +19,7 @@ module Hylo.PG.Connection
   , defaultPool
   , pool
   , runTx
+  , runTxAttempt
   , executeSql
   , executeSession
   , translateHasqlError
@@ -35,7 +36,8 @@ import qualified Hasql.Connection.Setting as S
 import qualified Hasql.Connection.Setting.Connection as SC
 import qualified Hasql.Session as Sess
 import Hylo.Core.Transaction
-  ( Tx (..)
+  ( BoundParam (..)
+  , Tx (..)
   , TxError (..)
   , TxMode (..)
   , TxOp (..)
@@ -44,6 +46,7 @@ import Hylo.Core.Transaction
   , initialTxState
   )
 import Hylo.PG.Transaction.Hooks (executeCommitHooks, executeRollbackHooks)
+import Hylo.SQL.Builder (formatParamValue)
 
 -- | PostgreSQL connection pool descriptor.
 data Pool = Pool
@@ -111,47 +114,64 @@ runTx ::
   TxMode ->
   Tx db mode a ->
   IO (Either TxError a)
-runTx (Pool _ _ (Just conn)) mode tx = do
-  let (res, st) = executeTx tx initialTxState
+runTx targetPool mode tx = do
+  let beginSql = case mode of
+        ReadOnly -> "BEGIN TRANSACTION READ ONLY;"
+        ReadWrite -> "BEGIN TRANSACTION READ WRITE;"
+  (res, finalSt) <- runTxAttempt targetPool beginSql initialTxState tx
   case res of
     Left err -> do
-      executeRollbackHooks st
+      executeRollbackHooks finalSt
       pure (Left err)
     Right val -> do
-      let beginSql = case mode of
-            ReadOnly -> "BEGIN TRANSACTION READ ONLY;"
-            ReadWrite -> "BEGIN TRANSACTION READ WRITE;"
-      beginRes <- Sess.run (Sess.sql beginSql) conn
+      executeCommitHooks finalSt
+      pure (Right val)
+
+{- | Execute a single transaction attempt against a pool with a specific BEGIN command.
+If the pool has an active connection, executes against PostgreSQL; otherwise evaluates purely.
+Returns the result along with the final TxState.
+-}
+runTxAttempt ::
+  Pool ->
+  Text ->
+  TxState ->
+  Tx db mode a ->
+  IO (Either TxError a, TxState)
+runTxAttempt (Pool _ _ (Just conn)) beginSql st0 tx = do
+  let (res, st) = executeTx tx st0
+  case res of
+    Left err -> pure (Left err, st)
+    Right val -> do
+      beginRes <- Sess.run (Sess.sql (TE.encodeUtf8 beginSql)) conn
       case beginRes of
         Left qErr -> do
-          executeRollbackHooks st
-          pure (Left (translateHasqlError qErr))
+          _ <- Sess.run (Sess.sql "ROLLBACK;") conn
+          pure (Left (translateHasqlError qErr), st)
         Right () -> do
           opsRes <- runOps (txOperations st)
           case opsRes of
             Left err -> do
               _ <- Sess.run (Sess.sql "ROLLBACK;") conn
-              executeRollbackHooks st
-              pure (Left err)
+              pure (Left err, st)
             Right () -> do
               commitRes <- Sess.run (Sess.sql "COMMIT;") conn
               case commitRes of
                 Left qErr -> do
-                  executeRollbackHooks st
-                  pure (Left (translateHasqlError qErr))
-                Right () -> do
-                  executeCommitHooks st
-                  pure (Right val)
+                  _ <- Sess.run (Sess.sql "ROLLBACK;") conn
+                  pure (Left (translateHasqlError qErr), st)
+                Right () -> pure (Right val, st)
   where
     runOps [] = pure (Right ())
     runOps (op : rest) = case op of
-      OpMutate sqlText -> do
-        res <- Sess.run (Sess.sql (TE.encodeUtf8 sqlText)) conn
+      OpMutate (sqlText, params) -> do
+        let stmtSql = interpolateParams sqlText params
+        res <- Sess.run (Sess.sql (TE.encodeUtf8 stmtSql)) conn
         case res of
           Left qErr -> pure (Left (translateHasqlError qErr))
           Right () -> runOps rest
-      OpQuery sqlText -> do
-        res <- Sess.run (Sess.sql (TE.encodeUtf8 sqlText)) conn
+      OpQuery (sqlText, params) -> do
+        let stmtSql = interpolateParams sqlText params
+        res <- Sess.run (Sess.sql (TE.encodeUtf8 stmtSql)) conn
         case res of
           Left qErr -> pure (Left (translateHasqlError qErr))
           Right () -> runOps rest
@@ -170,15 +190,16 @@ runTx (Pool _ _ (Just conn)) mode tx = do
         case res of
           Left qErr -> pure (Left (translateHasqlError qErr))
           Right () -> runOps rest
-runTx (Pool _ _ Nothing) _ tx = do
-  let (res, st) = executeTx tx initialTxState
-  case res of
-    Left err -> do
-      executeRollbackHooks st
-      pure (Left err)
-    Right val -> do
-      executeCommitHooks st
-      pure (Right val)
+runTxAttempt (Pool _ _ Nothing) _ st0 tx =
+  pure (executeTx tx st0)
+
+-- | Substitute bound parameters into SQL with proper quote escaping.
+interpolateParams :: Text -> [BoundParam] -> Text
+interpolateParams sql [] = sql
+interpolateParams sql params = foldl substPostgres sql params
+  where
+    substPostgres acc (BoundParam idx val pType) =
+      T.replace ("$" <> T.pack (show idx)) (formatParamValue val pType) acc
 
 -- | Execute a raw SQL statement against the pool's active connection.
 executeSql :: Pool -> Text -> IO (Either TxError ())

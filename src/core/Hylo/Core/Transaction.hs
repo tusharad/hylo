@@ -29,6 +29,8 @@ module Hylo.Core.Transaction
   , TxMode (..)
   , TxError (..)
   , TxOp (..)
+  , BoundParam (..)
+  , mkBoundParam
   , TxState (..)
   , initialTxState
 
@@ -50,15 +52,33 @@ module Hylo.Core.Transaction
 
     -- * Low-Level Mutation & Query Recording
   , recordMutation
+  , recordMutationWithParams
   , recordQuery
+  , recordQueryWithParams
   ) where
 
+import Control.DeepSeq (NFData (..))
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Hylo.Core.TypeError (AssertNoIO (..), TxMode (..))
+
+-- | Typed bind parameter extracted during query compilation or changeset rendering.
+data BoundParam = BoundParam
+  { paramIndex :: !Int
+  , paramValue :: !Text
+  , paramType :: !Text
+  }
+  deriving (Eq, Show, Generic)
+
+instance NFData BoundParam where
+  rnf (BoundParam i v t) = rnf i `seq` rnf v `seq` rnf t
+
+-- | Smart constructor for 'BoundParam'.
+mkBoundParam :: Int -> Text -> Text -> BoundParam
+mkBoundParam = BoundParam
 
 -- | Transaction execution error descriptors.
 data TxError
@@ -70,8 +90,8 @@ data TxError
 
 -- | Operation descriptors recorded during transaction execution.
 data TxOp
-  = OpQuery !Text
-  | OpMutate !Text
+  = OpQuery !(Text, [BoundParam])
+  | OpMutate !(Text, [BoundParam])
   | OpSavepoint !Int !Text
   | OpReleaseSavepoint !Int !Text
   | OpRollbackSavepoint !Int !Text
@@ -246,14 +266,22 @@ simulateDeadlocks n = TxAction $ \st ->
     then (Left (TxDeadlockDetected "40P01: deadlock detected (simulated)"), st)
     else (Right (), st)
 
--- | Record a mutation operation within the transaction state.
-recordMutation :: forall k (db :: k) mode. Text -> Tx db mode ()
-recordMutation descSql = TxAction $ \st ->
-  let st' = st {txOperations = txOperations st ++ [OpMutate descSql]}
+-- | Record a mutation operation with optional bind parameters within the transaction state.
+recordMutationWithParams :: forall k (db :: k) mode. Text -> [BoundParam] -> Tx db mode ()
+recordMutationWithParams descSql params = TxAction $ \st ->
+  let st' = st {txOperations = txOperations st ++ [OpMutate (descSql, params)]}
    in (Right (), st')
 
--- | Record a raw query operation within the transaction state.
-recordQuery :: forall k (db :: k) mode. Text -> Tx db mode ()
-recordQuery descSql = TxAction $ \st ->
-  let st' = st {txOperations = txOperations st ++ [OpQuery descSql]}
+-- | Record a mutation operation without parameters within the transaction state.
+recordMutation :: forall k (db :: k) mode. Text -> Tx db mode ()
+recordMutation descSql = recordMutationWithParams descSql []
+
+-- | Record a raw query operation with optional bind parameters within the transaction state.
+recordQueryWithParams :: forall k (db :: k) mode. Text -> [BoundParam] -> Tx db mode ()
+recordQueryWithParams descSql params = TxAction $ \st ->
+  let st' = st {txOperations = txOperations st ++ [OpQuery (descSql, params)]}
    in (Right (), st')
+
+-- | Record a raw query operation without parameters within the transaction state.
+recordQuery :: forall k (db :: k) mode. Text -> Tx db mode ()
+recordQuery descSql = recordQueryWithParams descSql []

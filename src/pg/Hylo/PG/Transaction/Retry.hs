@@ -43,6 +43,8 @@ module Hylo.PG.Transaction.Retry
   , pattern TxSerializationFailure
   , simulateSerializationFailureOnce
   , simulateSerializationFailures
+  , simulateWriteConflictOnce
+  , simulateWriteConflicts
   , simulateDeadlockOnce
   , simulateDeadlocks
   ) where
@@ -56,7 +58,6 @@ import Hylo.Core.Transaction
   , TxError (..)
   , TxMode (..)
   , TxState (..)
-  , executeTx
   , initialTxState
   , onCommit
   , onRollback
@@ -65,7 +66,7 @@ import Hylo.Core.Transaction
   , simulateWriteConflictOnce
   , simulateWriteConflicts
   )
-import Hylo.PG.Connection (Pool (..), defaultPool, pool)
+import Hylo.PG.Connection (Pool (..), defaultPool, pool, runTxAttempt)
 import Hylo.PG.Transaction.Hooks (executeCommitHooks, executeRollbackHooks)
 
 -- | PostgreSQL transaction isolation levels.
@@ -147,6 +148,7 @@ isRetryableError = \case
   TxConstraintViolation {} -> False
 
 {- | Execute a transaction computation with automatic retry upon serialization conflict or deadlock.
+Passes targetPool and IsolationLevel (renderBeginTransaction iso mode) to Hylo.PG.Connection.
 If the transaction succeeds, all accumulated 'onCommit' hooks run strictly once.
 If retries are exhausted or a non-retryable error occurs, accumulated 'onRollback' hooks run.
 -}
@@ -157,16 +159,18 @@ runTxWithRetry ::
   IsolationLevel ->
   Tx db mode a ->
   IO (Either TxError a)
-runTxWithRetry policy _targetPool _iso tx = loop 0
+runTxWithRetry policy targetPool iso tx = loop 0
   where
+    beginSql = renderBeginTransaction iso ReadWrite <> ";"
     loop :: Int -> IO (Either TxError a)
     loop attempt = do
       let st0 = initialTxState {txAttempt = attempt}
-      case executeTx tx st0 of
-        (Right val, finalSt) -> do
+      (res, finalSt) <- runTxAttempt targetPool beginSql st0 tx
+      case res of
+        Right val -> do
           executeCommitHooks finalSt
           pure (Right val)
-        (Left err, finalSt)
+        Left err
           | isRetryableError err && attempt < maxRetries policy -> do
               let rawBackoff =
                     fromIntegral (baseBackoffMicros policy)

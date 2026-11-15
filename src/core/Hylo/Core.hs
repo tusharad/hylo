@@ -70,6 +70,8 @@ module Hylo.Core
   , Tx (..)
   , TxError (..)
   , TxOp (..)
+  , BoundParam (..)
+  , mkBoundParam
   , TxState (..)
   , initialTxState
   , txFail
@@ -117,11 +119,10 @@ module Hylo.Core
   , lessThanOrEqualTo
   , numberRange
   , diffRecord
+  , diffField
   , dirtyFields
   , dirtyFieldMap
   , changesetDirtyFields
-  , genericDiff
-  , genericDirtyMap
   , Validation (..)
 
     -- * Automatic Nullability Lifting
@@ -134,6 +135,9 @@ module Hylo.Core
   , TableSchema (..)
   , tableSchema
   , Table (..)
+  , PatchVal (..)
+  , patchEntry
+  , eraseColDef
   , colSpecExpr
   , column
   , nullableColumn

@@ -60,6 +60,7 @@ module Hylo.SQL.Builder
   , compileQueryAST
   , previewQuery
   , previewQueryForDialect
+  , formatParamValue
   ) where
 
 import Control.DeepSeq (NFData (..))
@@ -85,6 +86,7 @@ import Hylo.Backend.Capability
   )
 import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query.Monad (Query (..), QueryState (..), initialQueryState)
+import Hylo.Core.Transaction (BoundParam (..), mkBoundParam)
 import Hylo.SQL.AST
   ( FromItem (..)
   , LateralBinding (..)
@@ -126,21 +128,6 @@ instance IsDialect SQLite where
 --------------------------------------------------------------------------------
 -- 2. Bound Parameters
 --------------------------------------------------------------------------------
-
--- | Typed bind parameter extracted during query compilation.
-data BoundParam = BoundParam
-  { paramIndex :: !Int
-  , paramValue :: !Text
-  , paramType :: !Text
-  }
-  deriving (Eq, Show, Generic)
-
-instance NFData BoundParam where
-  rnf (BoundParam i v t) = rnf i `seq` rnf v `seq` rnf t
-
--- | Smart constructor for 'BoundParam'.
-mkBoundParam :: Int -> Text -> Text -> BoundParam
-mkBoundParam = BoundParam
 
 -- | Strip surrounding quotes introduced by 'Show' on string literals.
 cleanParamValue :: Text -> Text

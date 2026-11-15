@@ -9,9 +9,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 {- |
@@ -77,13 +75,10 @@ module Hylo.Core.Changeset
 
     -- * Record Diffing & Dirty Field Tracking
   , diffRecord
+  , diffField
   , dirtyFields
   , dirtyFieldMap
   , changesetDirtyFields
-  , genericDiff
-  , genericDirtyMap
-  , GDiff (..)
-  , GDirtyMap (..)
   , ToFieldValue (..)
   ) where
 
@@ -92,26 +87,13 @@ import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.Generics
-  ( C1
-  , D1
-  , Generic (..)
-  , K1 (..)
-  , M1 (..)
-  , Meta (..)
-  , Rep
-  , S1
-  , U1 (..)
-  , (:*:) (..)
-  )
-import GHC.TypeLits (KnownSymbol, symbolVal)
+import GHC.Generics (Generic)
 import Hylo.Core.Context (Ctx (..), PatchField (..))
 import Hylo.Core.Error (FieldError (..))
 import Hylo.Core.Key (Id (..))
-import Hylo.Core.Table (Table (..), TableSchema (..))
+import Hylo.Core.Table (Table (..), TableSchema (..), ToFieldValue (..), diffField)
 
 --------------------------------------------------------------------------------
 -- Operations & Changeset Types
@@ -529,82 +511,3 @@ dirtyFieldMap = dirtyFields
 -- | Synonym for 'dirtyFields'.
 changesetDirtyFields :: (Table table) => Changeset table op -> Map Text Text
 changesetDirtyFields = dirtyFields
-
--- | Generic record diffing comparing two 'Result records and producing a 'Patch record.
-genericDiff ::
-  ( Generic (table 'Result)
-  , Generic (table 'Patch)
-  , GDiff (Rep (table 'Result)) (Rep (table 'Patch))
-  ) =>
-  table 'Result ->
-  table 'Result ->
-  table 'Patch
-genericDiff old new = to (gDiff (from old) (from new))
-
--- | Generic dirty-field map generator extracting all modified columns.
-genericDirtyMap ::
-  ( Generic (table 'Patch)
-  , GDirtyMap (Rep (table 'Patch))
-  ) =>
-  table 'Patch ->
-  Map Text Text
-genericDirtyMap patch = Map.fromList (gDirtyMap (from patch))
-
--- | Generic diffing algebra across HKD field representations.
-class GDiff f g where
-  gDiff :: f p -> f p -> g p
-
-instance (GDiff f g) => GDiff (M1 i c f) (M1 i c g) where
-  gDiff (M1 a) (M1 b) = M1 (gDiff a b)
-
-instance (GDiff f1 g1, GDiff f2 g2) => GDiff (f1 :*: f2) (g1 :*: g2) where
-  gDiff (a1 :*: b1) (a2 :*: b2) = gDiff a1 a2 :*: gDiff b1 b2
-
-instance (Eq a) => GDiff (K1 i a) (K1 i (PatchField a)) where
-  gDiff (K1 a) (K1 b)
-    | a == b = K1 Unchanged
-    | otherwise = K1 (SetTo b)
-
-instance GDiff U1 U1 where
-  gDiff U1 U1 = U1
-
--- | Generic dirty-field map generator traversing HKD selector metadata.
-class GDirtyMap f where
-  gDirtyMap :: f p -> [(Text, Text)]
-
-instance (GDirtyMap f) => GDirtyMap (D1 c f) where
-  gDirtyMap (M1 x) = gDirtyMap x
-
-instance (GDirtyMap f) => GDirtyMap (C1 c f) where
-  gDirtyMap (M1 x) = gDirtyMap x
-
-instance (GDirtyMap f1, GDirtyMap f2) => GDirtyMap (f1 :*: f2) where
-  gDirtyMap (a :*: b) = gDirtyMap a ++ gDirtyMap b
-
-instance (KnownSymbol s, ToFieldValue a) => GDirtyMap (S1 ('MetaSel ('Just s) u ss ds) (K1 i (PatchField a))) where
-  gDirtyMap (M1 (K1 (SetTo a))) = [(T.pack (symbolVal (Proxy @s)), toFieldValue a)]
-  gDirtyMap (M1 (K1 SetDefault)) = [(T.pack (symbolVal (Proxy @s)), "DEFAULT")]
-  gDirtyMap (M1 (K1 Unchanged)) = []
-
-instance GDirtyMap U1 where
-  gDirtyMap U1 = []
-
--- | Typeclass for formatting column values into textual representations for dirty-field maps.
-class ToFieldValue a where
-  toFieldValue :: a -> Text
-
-instance {-# OVERLAPPABLE #-} (Show a) => ToFieldValue a where
-  toFieldValue = T.pack . show
-
-instance {-# OVERLAPPING #-} ToFieldValue Text where
-  toFieldValue = id
-
-instance {-# OVERLAPPING #-} ToFieldValue String where
-  toFieldValue = T.pack
-
-instance (ToFieldValue a) => ToFieldValue (Maybe a) where
-  toFieldValue Nothing = "NULL"
-  toFieldValue (Just a) = toFieldValue a
-
-instance (ToFieldValue a) => ToFieldValue (Id table a) where
-  toFieldValue (Id a) = toFieldValue a

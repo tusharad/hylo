@@ -33,7 +33,6 @@ import GHC.Generics (Generic)
 import Hylo.Core
 import Hylo.Core.Query (PGVersion (..), Postgres)
 import Hylo.PG
-import Hylo.SQL (BoundParam (..))
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
@@ -60,18 +59,6 @@ deriving instance Show (AccountT 'Patch)
 
 type Account = AccountT 'Result
 
-instance Table AccountT where
-  toTableExpr alias meta =
-    Account
-      { id = colSpecExpr alias meta.id
-      , name = colSpecExpr alias meta.name
-      , email = colSpecExpr alias meta.email
-      , score = colSpecExpr alias meta.score
-      , active = colSpecExpr alias meta.active
-      }
-  diffTable = genericDiff
-  dirtyFieldsTable = genericDirtyMap
-
 accountSchema :: TableSchema AccountT
 accountSchema =
   tableSchema "accounts" $
@@ -82,6 +69,44 @@ accountSchema =
       , score = column "score" "bigint"
       , active = column "active" "boolean"
       }
+
+instance Table AccountT where
+  toTableExpr alias meta =
+    Account
+      { id = colSpecExpr alias meta.id
+      , name = colSpecExpr alias meta.name
+      , email = colSpecExpr alias meta.email
+      , score = colSpecExpr alias meta.score
+      , active = colSpecExpr alias meta.active
+      }
+  diffTable old new =
+    Account
+      { id = diffField old.id new.id
+      , name = diffField old.name new.name
+      , email = diffField old.email new.email
+      , score = diffField old.score new.score
+      , active = diffField old.active new.active
+      }
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.name
+    , eraseColDef m.email
+    , eraseColDef m.score
+    , eraseColDef m.active
+    ]
+  patchEntries meta patch =
+    concat
+      [ patchEntry meta.id patch.id
+      , patchEntry meta.name patch.name
+      , patchEntry meta.email patch.email
+      , patchEntry meta.score patch.score
+      , patchEntry meta.active patch.active
+      ]
+  dirtyFieldsTable patch =
+    Map.fromList
+      [ (colName c, case v of ValSetTo t -> t; ValSetDefault -> "DEFAULT")
+      | (c, v) <- patchEntries (tableMeta accountSchema) patch
+      ]
 
 accountCodec :: Codec Account Account
 accountCodec =
@@ -94,6 +119,47 @@ accountCodec =
 
 instance TableCodec AccountT where
   tableCodec = accountCodec
+
+--------------------------------------------------------------------------------
+-- Entity with non-matching Haskell field selector (userEmail) and ColDef ("email")
+--------------------------------------------------------------------------------
+
+data CustomUserT (ctx :: Ctx) = CustomUser
+  { userId :: !(Col ctx (Id CustomUserT Int64))
+  , userEmail :: !(Col ctx Text)
+  }
+
+customUserSchema :: TableSchema CustomUserT
+customUserSchema =
+  tableSchema "users" $
+    CustomUser
+      { userId = primaryKey "id" "bigint"
+      , userEmail = column "email" "text"
+      }
+
+instance Table CustomUserT where
+  toTableExpr alias meta =
+    CustomUser
+      { userId = colSpecExpr alias meta.userId
+      , userEmail = colSpecExpr alias meta.userEmail
+      }
+  diffTable old new =
+    CustomUser
+      { userId = diffField old.userId new.userId
+      , userEmail = diffField old.userEmail new.userEmail
+      }
+  tableColDefs m =
+    [ eraseColDef m.userId
+    , eraseColDef m.userEmail
+    ]
+  patchEntries meta patch =
+    patchEntry meta.userId patch.userId
+      ++ patchEntry meta.userEmail patch.userEmail
+  dirtyFieldsTable patch =
+    Map.fromList
+      [ (colName c, case v of ValSetTo t -> t; ValSetDefault -> "DEFAULT")
+      | (c, v) <- patchEntries (tableMeta customUserSchema) patch
+      ]
 
 aliceRecord :: Account
 aliceRecord =
@@ -413,3 +479,17 @@ spec = describe "User Story 5: Wire Changeset into hylo-pg Binary Execution & Er
             setCount = Map.size (Map.delete "id" (dirtyFields cs))
             (_, params) = renderUpdateChangesetSQL accountSchema cs
          in length params == setCount + 1
+
+  describe "8. User Story 8: Acceptance Criteria" $ do
+    it
+      "Acceptance Criterion 1: Table with Haskell record field userEmail and ColDef name 'email' generates INSERT and UPDATE using 'email' without Generic constraints"
+      $ do
+        let csInsert = change @'InsertOp (CustomUser Unchanged (SetTo "alice@example.com"))
+            (insertSql, insertParams) = renderInsertChangesetSQL customUserSchema csInsert
+        insertSql `shouldBe` "INSERT INTO \"users\" (\"email\") VALUES ($1) RETURNING *"
+        insertParams `shouldBe` [BoundParam 1 "alice@example.com" "text"]
+
+        let csUpdate = change @'UpdateOp (CustomUser Unchanged (SetTo "alice@example.com"))
+            (updateSql, updateParams) = renderUpdateChangesetSQL customUserSchema csUpdate
+        updateSql `shouldBe` "UPDATE \"users\" SET \"email\" = $1 WHERE \"id\" = $2 RETURNING *"
+        updateParams `shouldBe` [BoundParam 1 "alice@example.com" "text", BoundParam 2 "1" "integer"]
