@@ -1,11 +1,11 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE NoFieldSelectors #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE NoFieldSelectors #-}
 
 {- |
 Module      : Hylo.PG.AlgebraSpec
@@ -29,8 +29,8 @@ import Hylo.Core.Table
   ( Table (..)
   , TableSchema (..)
   , colName
-  , colSqlType
   , colSpecExpr
+  , colSqlType
   , column
   , eraseColDef
   , primaryKey
