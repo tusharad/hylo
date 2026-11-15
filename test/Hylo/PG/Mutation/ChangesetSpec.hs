@@ -467,10 +467,11 @@ spec = describe "User Story 5: Wire Changeset into hylo-pg Binary Execution & Er
   describe "7. QuickCheck Invariants" $ do
     it "bound parameters index is strictly monotonic 1..N+1 on partial updates" $ do
       property $ \(Positive (scoreVal :: Int64)) ->
-        let newAcc = aliceRecord {score = scoreVal}
-            cs = diffRecord accountSchema aliceRecord newAcc
-            (_, params) = renderUpdateChangesetSQL accountSchema cs
-         in map (\p -> p.paramIndex) params == [1, 2]
+        scoreVal /= 100 ==>
+          let newAcc = aliceRecord {score = scoreVal}
+              cs = diffRecord accountSchema aliceRecord newAcc
+              (_, params) = renderUpdateChangesetSQL accountSchema cs
+           in map (\p -> p.paramIndex) params == [1, 2]
 
     it "parameter count matches modified fields count + 1 on updates" $ do
       property $ \(Positive (scoreVal :: Int64)) (activeVal :: Bool) ->

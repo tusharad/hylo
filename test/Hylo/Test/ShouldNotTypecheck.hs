@@ -40,14 +40,7 @@ instance NFData TxOp
 
 instance NFData TxState where
   rnf (TxState s ops store a ch rh cs) =
-    rnf s
-      `seq` rnf ops
-      `seq` rnf store
-      `seq` rnf a
-      `seq` length ch
-      `seq` length rh
-      `seq` length cs
-      `seq` ()
+    rnf (s, ops, store, a, length ch, length rh, length cs)
 
 instance NFData a => NFData (Tx db mode a) where
   rnf (TxReturn a) = rnf a

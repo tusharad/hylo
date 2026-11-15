@@ -285,9 +285,9 @@ rawColumnDecoder = Dec.column (Dec.nullable (Dec.custom (\_ bs -> Right bs)))
 -- | Assemble raw PostgreSQL wire column payloads into a framed binary row byte string.
 assembleRowBytes :: [Maybe ByteString] -> ByteString
 assembleRowBytes cols =
-  BSL.toStrict
-    $ Builder.toLazyByteString
-    $ mconcat
+  BSL.toStrict (Builder.toLazyByteString (mconcat columnBuilders))
+  where
+    columnBuilders =
       [ case mbs of
           Nothing -> Builder.int32BE (-1)
           Just bs -> Builder.int32BE (fromIntegral (BS.length bs)) <> Builder.byteString bs
