@@ -139,7 +139,8 @@ spec = describe "User Story 17: PostgreSQL Arrays, Full-Text Search, and EXPLAIN
             where_ (tsRank (toTsVector a.body) queryExpr >. lit (0.1 :: Double))
             pure a
           cq = compilePostgresQuery q
-      cq.compiledSQL `shouldSatisfy` T.isInfixOf "ts_rank(to_tsvector(\"t0\".\"body\"), plainto_tsquery($1))"
+      cq.compiledSQL
+        `shouldSatisfy` T.isInfixOf "ts_rank(to_tsvector(\"t0\".\"body\"), plainto_tsquery($1))"
 
     it "compiles websearchToTsQuery and phraseToTsQuery" $ do
       let q :: Query (Postgres v) (MockArticleT 'Expr)

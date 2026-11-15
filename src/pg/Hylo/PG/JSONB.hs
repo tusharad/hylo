@@ -104,8 +104,9 @@ jsonbHasAnyKey = BinOpExpr "?|"
 jsonbHasAllKeys :: QExpr Aeson.Value -> QExpr [Text] -> QExpr Bool
 jsonbHasAllKeys = BinOpExpr "?&"
 
--- | PostgreSQL JSONB element / field extraction (->) returning JSONB.
--- Supports key text (object lookup) or integer index (array lookup).
+{- | PostgreSQL JSONB element / field extraction (->) returning JSONB.
+Supports key text (object lookup) or integer index (array lookup).
+-}
 jsonbGet :: QExpr Aeson.Value -> QExpr a -> QExpr Aeson.Value
 jsonbGet = BinOpExpr "->"
 
