@@ -1,4 +1,10 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoFieldSelectors #-}
 
 {- |
 Module      : Hylo.Migrate.DiffSpec
@@ -9,9 +15,27 @@ Maintainer  : tusharadhatrao@gmail.com
 -}
 module Hylo.Migrate.DiffSpec (spec) where
 
+import Data.Int (Int64)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Hylo.Core
+  ( Col
+  , Ctx (..)
+  , Id (..)
+  , PatchVal (..)
+  , Table (..)
+  , TableSchema
+  , colSpecExpr
+  , column
+  , diffField
+  , eraseColDef
+  , patchEntry
+  , primaryKey
+  , tableMeta
+  , tableSchema
+  )
+import qualified Hylo.Core.Context as CoreCtx
 import Hylo.Migrate.AST
 import Hylo.Migrate.Catalog
 import Hylo.Migrate.Catalog.PG
@@ -19,6 +43,64 @@ import Hylo.Migrate.CodeGen
 import Hylo.Migrate.Diff
 import Test.Hspec
 import Test.QuickCheck
+
+-- | Test Table: Account entity for TableSchema to Catalog bridge tests.
+data AccountT (ctx :: Ctx) = Account
+  { id :: !(Col ctx (Id AccountT Int64))
+  , name :: !(Col ctx Text)
+  , email :: !(Col ctx Text)
+  , score :: !(Col ctx Int64)
+  , active :: !(Col ctx Bool)
+  }
+
+accountSchema :: TableSchema AccountT
+accountSchema =
+  tableSchema "accounts" $
+    Account
+      { id = primaryKey "id" "bigint"
+      , name = column "name" "text"
+      , email = column "email" "text"
+      , score = column "score" "bigint"
+      , active = column "active" "boolean"
+      }
+
+instance Table AccountT where
+  toTableExpr alias meta =
+    Account
+      { id = colSpecExpr alias meta.id
+      , name = colSpecExpr alias meta.name
+      , email = colSpecExpr alias meta.email
+      , score = colSpecExpr alias meta.score
+      , active = colSpecExpr alias meta.active
+      }
+  diffTable old new =
+    Account
+      { id = diffField old.id new.id
+      , name = diffField old.name new.name
+      , email = diffField old.email new.email
+      , score = diffField old.score new.score
+      , active = diffField old.active new.active
+      }
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.name
+    , eraseColDef m.email
+    , eraseColDef m.score
+    , eraseColDef m.active
+    ]
+  patchEntries meta patch =
+    concat
+      [ patchEntry meta.id patch.id
+      , patchEntry meta.name patch.name
+      , patchEntry meta.email patch.email
+      , patchEntry meta.score patch.score
+      , patchEntry meta.active patch.active
+      ]
+  dirtyFieldsTable patch =
+    Map.fromList
+      [ (CoreCtx.colName c, case v of ValSetTo t -> t; ValSetDefault -> "DEFAULT")
+      | (c, v) <- patchEntries (tableMeta accountSchema) patch
+      ]
 
 -- | QuickCheck generator for safe alphanumeric SQL identifiers.
 genIdentifier :: Gen Text
@@ -83,10 +165,11 @@ genTableDef = do
 deduplicateCols :: [ColumnDef] -> [ColumnDef]
 deduplicateCols = go []
   where
+    go :: [ColumnName] -> [ColumnDef] -> [ColumnDef]
     go _ [] = []
     go seen (c : cs)
-      | colName c `elem` seen = go seen cs
-      | otherwise = c : go (colName c : seen) cs
+      | c.colName `elem` seen = go seen cs
+      | otherwise = c : go (c.colName : seen) cs
 
 -- | QuickCheck generator for arbitrary Catalog.
 genCatalog :: Gen Catalog
@@ -209,14 +292,18 @@ spec = describe "Epic 18: Live Catalog Introspection & DDL Synthesis" $ do
   describe "Law 2: Idempotence of Reverse Codegen" $ do
     it "synthesizes compilable Haskell HKD schemas for documents table" $ do
       let cat = emptyCatalog & addTable sampleDocumentCatalogDef
-          code = generateHaskellSchema cat
-      code `shouldContain` "data DocumentsT f ="
-      code `shouldContain` "documentId :: !(f Int64)"
-      code `shouldContain` "documentTitle :: !(f Text)"
-      code `shouldContain` "documentContent :: !(f (Nullable Text))"
-      code `shouldContain` "documentEmbedding :: !(f (Nullable (Embedding \"default\" 1536)))"
-      code `shouldContain` "type Documents = DocumentsT Identity"
-      code `shouldContain` "type DocumentsExpr = DocumentsT Expr"
+          code = generateHaskellSchema cat :: String
+      code `shouldContain` "data DocumentsT (ctx :: Ctx) ="
+      code `shouldContain` "documentId :: !(Col ctx Int64)"
+      code `shouldContain` "documentTitle :: !(Col ctx Text)"
+      code `shouldContain` "documentContent :: !(Col ctx (Maybe Text))"
+      code `shouldContain` "documentEmbedding :: !(Col ctx (Maybe (Embedding \"default\" 1536)))"
+      code `shouldContain` "type Documents = DocumentsT 'Result"
+      code `shouldContain` "type DocumentsExpr = DocumentsT 'Expr"
+      code `shouldContain` "type DocumentsPatch = DocumentsT 'Patch"
+      code `shouldContain` "type DocumentsMeta = DocumentsT 'Meta"
+      code `shouldContain` "documentsSchema :: TableSchema DocumentsT"
+      code `shouldContain` "instance Table DocumentsT where"
 
     it "satisfies Law 2 idempotence: reverse-parsed codegen produces identical column schema" $ do
       let baseTable =
@@ -332,3 +419,54 @@ spec = describe "Epic 18: Live Catalog Introspection & DDL Synthesis" $ do
           length (tblColumns tbl) `shouldBe` 2
           length (tblIndexes tbl) `shouldBe` 1
           length (tblConstraints tbl) `shouldBe` 1
+
+  describe "User Story 11: 4-Context Codegen & TableSchema Catalog Bridge" $ do
+    it
+      "Acceptance Criterion 1: Running generateHaskellSchema on a Catalog emits record definitions using Col ctx a and type aliases (<Name> = <Name>T 'Result)"
+      $ do
+        let cat = emptyCatalog & addTable sampleDocumentCatalogDef
+            code = generateHaskellSchema cat :: String
+        code `shouldContain` "data DocumentsT (ctx :: Ctx) ="
+        code `shouldContain` "documentId :: !(Col ctx Int64)"
+        code `shouldContain` "type Documents = DocumentsT 'Result"
+        code `shouldContain` "type DocumentsExpr = DocumentsT 'Expr"
+        code `shouldContain` "type DocumentsPatch = DocumentsT 'Patch"
+        code `shouldContain` "type DocumentsMeta = DocumentsT 'Meta"
+        code `shouldContain` "documentsSchema :: TableSchema DocumentsT"
+        code `shouldContain` "instance Table DocumentsT where"
+
+    it
+      "Acceptance Criterion 2: catalogFromCodeGen parses generated Haskell code back into an identical Catalog without loss"
+      $ do
+        let cat = emptyCatalog & addTable sampleDocumentCatalogDef
+            code = generateHaskellSchema cat :: String
+            rebuiltCat = catalogFromCodeGen (T.pack code)
+            diff = computeCatalogDiff cat rebuiltCat
+        cdAddedTables diff `shouldBe` []
+        cdDroppedTables diff `shouldBe` []
+        case cdModifiedTables diff of
+          [] -> pure ()
+          [td] -> do
+            tdAddedColumns td `shouldBe` []
+            tdDroppedColumns td `shouldBe` []
+            tdModifiedColumns td `shouldBe` []
+          other -> expectationFailure ("Unexpected table diffs: " ++ show other)
+
+    it
+      "Acceptance Criterion 3: tableSchemaToDef accountSchema produces a TableDef with matching tableName, columns, and types"
+      $ do
+        let tblDef = tableSchemaToDef accountSchema
+        tblDef.tblName `shouldBe` TableName "accounts"
+        let colNames = [unColumnName c.colName | c <- tblDef.tblColumns]
+        colNames `shouldBe` ["id", "name", "email", "score", "active"]
+        let colTypes = [c.colType | c <- tblDef.tblColumns]
+        colTypes `shouldBe` [TypeBigInt, TypeText, TypeText, TypeBigInt, TypeBoolean]
+        let pks = [c.colName | c <- tblDef.tblColumns, c.colIsPrimaryKey]
+        pks `shouldBe` [ColumnName "id"]
+        let nulls = [c.colNullability | c <- tblDef.tblColumns]
+        nulls `shouldBe` [NotNull, NotNull, NotNull, NotNull, NotNull]
+
+    it "schemasToCatalog aggregates TableDefs into a queryable Catalog" $ do
+      let tblDef = tableSchemaToDef accountSchema
+          cat = schemasToCatalog [tblDef]
+      lookupTable (TableName "accounts") cat `shouldBe` Just tblDef

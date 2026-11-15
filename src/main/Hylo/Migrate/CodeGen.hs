@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 {- |
@@ -20,6 +21,7 @@ module Hylo.Migrate.CodeGen
   , toCamelCase
   , columnTypeToHaskell
   , haskellToColumnType
+  , renderSqlType
   ) where
 
 import Data.Char (isUpper, toLower, toUpper)
@@ -32,8 +34,8 @@ import Hylo.Migrate.AST
 import Hylo.Migrate.Catalog
 
 {- | Generate idiomatic, compilable Haskell HKD source code from a database Catalog.
-Synthesizes data types, Identity and Expr type aliases, Table instances,
-and field comments.
+Synthesizes 4-context 'Col ctx a' data types, type aliases, complete Table instances,
+and TableSchema values.
 -}
 generateHaskellSchema :: (IsString s) => Catalog -> s
 generateHaskellSchema cat =
@@ -42,10 +44,13 @@ generateHaskellSchema cat =
           [ "{-# LANGUAGE DataKinds #-}"
           , "{-# LANGUAGE DeriveAnyClass #-}"
           , "{-# LANGUAGE DeriveGeneric #-}"
+          , "{-# LANGUAGE DuplicateRecordFields #-}"
           , "{-# LANGUAGE FlexibleInstances #-}"
+          , "{-# LANGUAGE OverloadedRecordDot #-}"
           , "{-# LANGUAGE OverloadedStrings #-}"
           , "{-# LANGUAGE StandaloneDeriving #-}"
           , "{-# LANGUAGE TypeFamilies #-}"
+          , "{-# LANGUAGE NoFieldSelectors #-}"
           , ""
           , "{- |"
           , "Module      : Database.Schema.Generated"
@@ -54,13 +59,29 @@ generateHaskellSchema cat =
           , "-}"
           , "module Database.Schema.Generated where"
           , ""
-          , "import Data.Functor.Identity (Identity)"
           , "import Data.Int (Int16, Int32, Int64)"
+          , "import qualified Data.Map.Strict as Map"
           , "import Data.Text (Text)"
           , "import Data.Time (UTCTime)"
           , "import GHC.Generics (Generic)"
-          , "import Hylo.Core.Key (Id)"
-          , "import Hylo.Core.Query (Expr, Nullable, Table (..))"
+          , "import Hylo.Core"
+          , "  ( Col"
+          , "  , ColDef"
+          , "  , Ctx (..)"
+          , "  , PatchVal (..)"
+          , "  , Table (..)"
+          , "  , TableSchema"
+          , "  , colName"
+          , "  , colSpecExpr"
+          , "  , column"
+          , "  , diffField"
+          , "  , eraseColDef"
+          , "  , nullableColumn"
+          , "  , patchEntry"
+          , "  , primaryKey"
+          , "  , tableMeta"
+          , "  , tableSchema"
+          , "  )"
           , "import Hylo.PG.Vector (Embedding)"
           , ""
           ]
@@ -74,6 +95,7 @@ generateTableHkd tbl =
   let tName = unTableName (tblName tbl)
       typeName = toPascalCase tName
       hkdName = typeName <> "T"
+      schemaName = toCamelCase tName <> "Schema"
       docComment = case tblComment tbl of
         Just c -> "-- | " <> c <> "\n"
         Nothing -> "-- | Generated HKD table schema for " <> tName <> ".\n"
@@ -87,7 +109,12 @@ generateTableHkd tbl =
                   cComment = case colComment col of
                     Just c -> "  -- ^ " <> c
                     Nothing -> ""
-               in "  , " <> fName <> " :: !(f " <> fType <> ")" <> (if T.null cComment then "" else "\n" <> cComment)
+               in "  , "
+                    <> fName
+                    <> " :: !(Col ctx "
+                    <> fType
+                    <> ")"
+                    <> (if T.null cComment then "" else "\n" <> cComment)
           )
           (tblColumns tbl)
 
@@ -101,7 +128,7 @@ generateTableHkd tbl =
         docComment
           <> "data "
           <> hkdName
-          <> " f =\n"
+          <> " (ctx :: Ctx) =\n"
           <> typeName
           <> "\n"
           <> fieldsFormatted
@@ -110,13 +137,114 @@ generateTableHkd tbl =
       aliases =
         T.unlines
           [ ""
-          , "-- | Pure Identity representation of " <> typeName
-          , "type " <> typeName <> " = " <> hkdName <> " Identity"
+          , "-- | Result context representation for " <> typeName
+          , "type " <> typeName <> " = " <> hkdName <> " 'Result"
           , ""
-          , "-- | SQL Query Expression representation of " <> typeName
-          , "type " <> typeName <> "Expr = " <> hkdName <> " Expr"
+          , "-- | Query expression context representation for " <> typeName
+          , "type " <> typeName <> "Expr = " <> hkdName <> " 'Expr"
+          , ""
+          , "-- | Patch context representation for " <> typeName
+          , "type " <> typeName <> "Patch = " <> hkdName <> " 'Patch"
+          , ""
+          , "-- | Metadata context representation for " <> typeName
+          , "type " <> typeName <> "Meta = " <> hkdName <> " 'Meta"
           ]
-   in dataDecl <> aliases
+
+      fieldNames = map (\col -> fieldPrefix <> toPascalCase (unColumnName (colName col))) (tblColumns tbl)
+
+      schemaDecl =
+        if null (tblColumns tbl)
+          then
+            T.unlines
+              [ "-- | Table schema for " <> tName
+              , schemaName <> " :: TableSchema " <> hkdName
+              , schemaName <> " ="
+              , "  tableSchema \"" <> tName <> "\" " <> typeName
+              ]
+          else
+            let colSpecs =
+                  map
+                    ( \col ->
+                        let fn = fieldPrefix <> toPascalCase (unColumnName (colName col))
+                            cn = unColumnName (colName col)
+                            st = renderSqlType (colType col)
+                            fnCall
+                              | colIsPrimaryKey col = "primaryKey \"" <> cn <> "\" \"" <> st <> "\""
+                              | colNullability col == Nullable = "nullableColumn \"" <> cn <> "\" \"" <> st <> "\""
+                              | otherwise = "column \"" <> cn <> "\" \"" <> st <> "\""
+                         in fn <> " = " <> fnCall
+                    )
+                    (tblColumns tbl)
+             in T.unlines
+                  [ "-- | Table schema for " <> tName
+                  , schemaName <> " :: TableSchema " <> hkdName
+                  , schemaName <> " ="
+                  , "  tableSchema \"" <> tName <> "\" $"
+                  , "    " <> typeName
+                  , "      { " <> T.intercalate "\n      , " colSpecs
+                  , "      }"
+                  ]
+
+      tableInstance =
+        if null fieldNames
+          then
+            T.unlines
+              [ "instance Table " <> hkdName <> " where"
+              , "  toTableExpr _ _ = " <> typeName
+              , "  diffTable _ _ = " <> typeName
+              , "  tableColDefs _ = []"
+              , "  patchEntries _ _ = []"
+              , "  dirtyFieldsTable _ = Map.empty"
+              ]
+          else
+            T.unlines
+              [ "instance Table " <> hkdName <> " where"
+              , "  toTableExpr alias meta ="
+              , "    " <> typeName
+              , "      { "
+                  <> T.intercalate "\n      , " [fn <> " = colSpecExpr alias meta." <> fn | fn <- fieldNames]
+              , "      }"
+              , "  diffTable old new ="
+              , "    " <> typeName
+              , "      { "
+                  <> T.intercalate "\n      , " [fn <> " = diffField old." <> fn <> " new." <> fn | fn <- fieldNames]
+              , "      }"
+              , "  tableColDefs m ="
+              , "    [ " <> T.intercalate "\n    , " ["eraseColDef m." <> fn | fn <- fieldNames]
+              , "    ]"
+              , "  patchEntries meta patch ="
+              , "    concat"
+              , "      [ "
+                  <> T.intercalate "\n      , " ["patchEntry meta." <> fn <> " patch." <> fn | fn <- fieldNames]
+              , "      ]"
+              , "  dirtyFieldsTable patch ="
+              , "    Map.fromList"
+              , "      [ (colName c, case v of ValSetTo t -> t; ValSetDefault -> \"DEFAULT\")"
+              , "      | (c, v) <- patchEntries (tableMeta " <> schemaName <> ") patch"
+              , "      ]"
+              ]
+   in dataDecl <> aliases <> "\n" <> schemaDecl <> "\n" <> tableInstance
+
+-- | Render SQL type name for TableSchema construction.
+renderSqlType :: ColumnType -> Text
+renderSqlType = \case
+  TypeSmallInt -> "smallint"
+  TypeInteger -> "integer"
+  TypeBigInt -> "bigint"
+  TypeText -> "text"
+  TypeVarChar (Just n) -> "varchar(" <> T.pack (show n) <> ")"
+  TypeVarChar Nothing -> "varchar"
+  TypeBoolean -> "boolean"
+  TypeTimestamp -> "timestamp"
+  TypeTimestamptz -> "timestamptz"
+  TypeDate -> "date"
+  TypeTime -> "time"
+  TypeJson -> "json"
+  TypeJsonb -> "jsonb"
+  TypeUuid -> "uuid"
+  TypeVector (Just dim) -> "vector(" <> T.pack (show dim) <> ")"
+  TypeVector Nothing -> "vector"
+  TypeCustom t -> t
 
 -- | Convert a ColumnType and nullability to Haskell type representation.
 columnTypeToHaskell :: ColumnType -> ColumnNullability -> Text
@@ -142,21 +270,30 @@ columnTypeToHaskell cType nullability =
         NotNull -> baseType
         Nullable ->
           let wrapped = if " " `T.isInfixOf` baseType then "(" <> baseType <> ")" else baseType
-           in "(Nullable " <> wrapped <> ")"
+           in "(Maybe " <> wrapped <> ")"
 
 -- | Convert a Haskell type string back to Hylo ColumnType and Nullability.
 haskellToColumnType :: Text -> (ColumnType, ColumnNullability)
 haskellToColumnType raw =
   let t = T.strip raw
-   in if "(Nullable " `T.isPrefixOf` t && ")" `T.isSuffixOf` t
+   in if "(Maybe " `T.isPrefixOf` t && ")" `T.isSuffixOf` t
         then
-          let inner = T.strip (T.dropEnd 1 (T.drop 10 t))
+          let inner = T.strip (T.dropEnd 1 (T.drop 7 t))
               cleanInner =
                 if "(" `T.isPrefixOf` inner && ")" `T.isSuffixOf` inner
                   then T.strip (T.dropEnd 1 (T.drop 1 inner))
                   else inner
            in (baseHaskellToType cleanInner, Nullable)
-        else (baseHaskellToType t, NotNull)
+        else
+          if "(Nullable " `T.isPrefixOf` t && ")" `T.isSuffixOf` t
+            then
+              let inner = T.strip (T.dropEnd 1 (T.drop 10 t))
+                  cleanInner =
+                    if "(" `T.isPrefixOf` inner && ")" `T.isSuffixOf` inner
+                      then T.strip (T.dropEnd 1 (T.drop 1 inner))
+                      else inner
+               in (baseHaskellToType cleanInner, Nullable)
+            else (baseHaskellToType t, NotNull)
 
 -- | Convert non-nullable Haskell type string to ColumnType.
 baseHaskellToType :: Text -> ColumnType
@@ -194,10 +331,14 @@ catalogFromCodeGen code =
 extractTableBlocks :: [Text] -> [[Text]]
 extractTableBlocks [] = []
 extractTableBlocks (l : ls)
-  | "data " `T.isPrefixOf` l && " f =" `T.isInfixOf` l =
-      let (block, rest) = break (\line -> "data " `T.isPrefixOf` line && " f =" `T.isInfixOf` line) ls
+  | isDataDecl l =
+      let (block, rest) = break isDataDecl ls
        in (l : block) : extractTableBlocks rest
   | otherwise = extractTableBlocks ls
+  where
+    isDataDecl line =
+      "data " `T.isPrefixOf` line
+        && ("(ctx :: Ctx) =" `T.isInfixOf` line || " f =" `T.isInfixOf` line)
 
 -- | Parse a single Haskell data declaration block into a TableDef.
 parseTableBlock :: [Text] -> TableDef
@@ -205,9 +346,13 @@ parseTableBlock block =
   let firstLine = case block of
         (x : _) -> x
         [] -> ""
-      typeName = T.takeWhile (/= 'T') (T.drop 5 firstLine)
+      wordsAfterData = T.words (T.drop 5 firstLine)
+      nameWithT = case wordsAfterData of
+        (w : _) -> w
+        [] -> ""
+      typeName = if "T" `T.isSuffixOf` nameWithT then T.dropEnd 1 nameWithT else nameWithT
       tableName = toSnakeCase typeName
-      rawFields = [l | l <- block, ":: !(f " `T.isInfixOf` l]
+      rawFields = [l | l <- block, ":: !(Col ctx " `T.isInfixOf` l || ":: !(f " `T.isInfixOf` l]
       cols = map (parseFieldLine tableName) rawFields
    in TableDef
         { tblName = TableName tableName
@@ -223,9 +368,15 @@ parseFieldLine tblSnake line =
   let stripped = T.strip line
       cleanLine = if "," `T.isPrefixOf` stripped then T.strip (T.drop 1 stripped) else stripped
       cleanLine' = if "{" `T.isPrefixOf` cleanLine then T.strip (T.drop 1 cleanLine) else cleanLine
-      (fName, rest) = T.breakOn ":: !(f " cleanLine'
+      (fName, rest) =
+        if ":: !(Col ctx " `T.isInfixOf` cleanLine'
+          then T.breakOn ":: !(Col ctx " cleanLine'
+          else T.breakOn ":: !(f " cleanLine'
       fNameClean = T.strip fName
-      typePart = T.dropEnd 1 (T.drop 6 (T.strip rest))
+      typePart =
+        if ":: !(Col ctx " `T.isPrefixOf` rest
+          then T.dropEnd 1 (T.drop 13 (T.strip rest))
+          else T.dropEnd 1 (T.drop 6 (T.strip rest))
       (cType, nullability) = haskellToColumnType typePart
       colSnake = stripTablePrefix tblSnake (toSnakeCase fNameClean)
    in ColumnDef
