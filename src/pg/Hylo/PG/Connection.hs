@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -29,19 +30,25 @@ module Hylo.PG.Connection
   , mkPreparedStatement
   , mkPreparedQueryStatement
   , assembleRowBytes
+  , rawColumnDecoder
   , decodeRowWithCodec
   , executePreparedQuery
+  , selectRows
+  , selectRowsWithSchema
+  , selectRowsTx
+  , selectRowsTxWith
   )
 where
 
 import Control.Applicative ((<|>))
 import Control.DeepSeq (NFData (..))
-import Control.Monad (replicateM)
+import Control.Monad (replicateM, void)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Lazy as BSL
 import Data.Char (isDigit)
+import Data.Foldable (toList)
 import Data.Functor.Contravariant (contramap)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
@@ -67,7 +74,11 @@ import qualified Hasql.Decoders as Dec
 import qualified Hasql.Encoders as Enc
 import qualified Hasql.Session as Sess
 import qualified Hasql.Statement as Stmt
+import Hylo.Backend.Capability (Postgres)
 import Hylo.Core.Codec (RowCodec, runBinaryDecoder)
+import Hylo.Core.Context (Ctx (..))
+import Hylo.Core.Query.Monad (Query (..), initialQueryState, runQuery)
+import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.Core.Transaction
   ( BoundParam (..)
   , Tx (..)
@@ -78,8 +89,11 @@ import Hylo.Core.Transaction
   , executeTx
   , initialTxState
   )
+import Hylo.PG.Codec.Binary (TableCodec (..))
+import Hylo.PG.Compiler.SQL (compilePostgresQuery)
 import Hylo.PG.Transaction.Hooks (executeCommitHooks, executeRollbackHooks)
-import Hylo.SQL.Builder (formatParamValue)
+import Hylo.SQL.AST (Projectable (..))
+import Hylo.SQL.Builder (CompiledQuery (..), formatParamValue)
 import Text.Read (readMaybe)
 
 -- | PostgreSQL connection pool descriptor.
@@ -260,7 +274,7 @@ boundParamValueEncoder pType
   | pType == "bigint" || pType == "int8" = contramap parseOrZero Enc.int8
   | pType == "smallint" || pType == "int2" = contramap parseOrZero Enc.int2
   | pType == "boolean" || pType == "bool" =
-      contramap (\t -> t == "true" || t == "TRUE" || t == "t") Enc.bool
+      contramap (\t -> let low = T.toLower t in low == "true" || low == "t" || low == "1") Enc.bool
   | pType == "double precision" || pType == "float8" || pType == "numeric" =
       contramap parseOrZero Enc.float8
   | pType == "real" || pType == "float4" = contramap parseOrZero Enc.float4
@@ -315,10 +329,18 @@ buildParamsEncoder ps =
     | (i, p) <- zip [0 ..] ps
     ]
 
--- | Build a prepared Hasql statement sending [BoundParam] and discarding results.
+{- | Build a prepared Hasql statement sending [BoundParam] and discarding results.
+Uses a row-discarding decoder when the query contains RETURNING or SELECT.
+-}
 mkPreparedStatement :: ByteString -> [BoundParam] -> Stmt.Statement [BoundParam] ()
 mkPreparedStatement sqlBS ps =
-  Stmt.Statement sqlBS (buildParamsEncoder ps) Dec.noResult True
+  let u = T.toUpper (TE.decodeUtf8 sqlBS)
+      isReturningOrSelect = "RETURNING" `T.isInfixOf` u || "SELECT" `T.isInfixOf` u
+      decoder =
+        if isReturningOrSelect
+          then void (Dec.rowList rawColumnDecoder)
+          else Dec.noResult
+   in Stmt.Statement sqlBS (buildParamsEncoder ps) decoder True
 
 -- | Decode a single column as raw nullable bytes.
 rawColumnDecoder :: Dec.Row (Maybe ByteString)
@@ -375,6 +397,70 @@ executePreparedQuery (Pool _ _ (Just conn)) sqlText params codec numCols = do
     Right rows -> pure (Right rows)
 executePreparedQuery (Pool _ _ Nothing) _ _ _ _ =
   pure (Left (TxUserError "executePreparedQuery: no active PostgreSQL connection in pool"))
+
+-- | Execute a typed Query against a PostgreSQL pool and hydrate domain rows.
+selectRows ::
+  forall table v.
+  (Projectable (table 'Expr), Table table, TableCodec table) =>
+  Pool ->
+  Query (Postgres v) (table 'Expr) ->
+  IO (Either TxError [table 'Result])
+selectRows targetPool q = do
+  let compiled = compilePostgresQuery q
+      (expr, _) = runQuery q initialQueryState
+      cols = case tableExprColumns expr of
+        [] -> projectColumns expr
+        cs -> cs
+      numCols = length cols
+  executePreparedQuery
+    targetPool
+    compiled.compiledSQL
+    (toList compiled.compiledParams)
+    (tableCodec :: RowCodec (table 'Result) (table 'Result))
+    numCols
+
+-- | Execute a typed Query against a PostgreSQL pool using a schema for column counting.
+selectRowsWithSchema ::
+  forall table v.
+  (Projectable (table 'Expr), Table table, TableCodec table) =>
+  Pool ->
+  TableSchema table ->
+  Query (Postgres v) (table 'Expr) ->
+  IO (Either TxError [table 'Result])
+selectRowsWithSchema targetPool schema q = do
+  let compiled = compilePostgresQuery q
+      numCols = length (tableColDefs (tableMeta schema))
+  executePreparedQuery
+    targetPool
+    compiled.compiledSQL
+    (toList compiled.compiledParams)
+    (tableCodec :: RowCodec (table 'Result) (table 'Result))
+    numCols
+
+-- | Transaction-aware counterpart to 'selectRows' recording 'OpQuery' and returning empty fallback rows.
+selectRowsTx ::
+  forall table v (mode :: TxMode).
+  (Projectable (table 'Expr), Table table, TableCodec table) =>
+  Query (Postgres v) (table 'Expr) ->
+  Tx (Postgres v) mode [table 'Result]
+selectRowsTx = selectRowsTxWith []
+
+-- | Transaction-aware counterpart to 'selectRows' recording 'OpQuery' and returning the given fallback rows.
+selectRowsTxWith ::
+  forall table v (mode :: TxMode).
+  (Projectable (table 'Expr), Table table, TableCodec table) =>
+  [table 'Result] ->
+  Query (Postgres v) (table 'Expr) ->
+  Tx (Postgres v) mode [table 'Result]
+selectRowsTxWith fallback q =
+  seq (tableCodec :: RowCodec (table 'Result) (table 'Result)) $
+    TxAction $ \st ->
+      let compiled = compilePostgresQuery q
+          (expr, _) = runQuery q initialQueryState
+          _unused = tableExprColumns expr
+          op = OpQuery (compiled.compiledSQL, toList compiled.compiledParams)
+          st' = st {txOperations = txOperations st ++ [op]}
+       in _unused `seq` (Right fallback, st')
 
 -- | Execute a raw SQL statement against the pool's active connection.
 executeSql :: Pool -> Text -> IO (Either TxError ())

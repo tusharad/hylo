@@ -42,9 +42,17 @@ module Hylo.PG.Mutation.Changeset
   , insertChangeset
   , insertChangesetWith
   , insertChangesetWithRow
+  , insertChangesetWithFallback
   , updateChangeset
   , updateChangesetWith
   , updateChangesetWithRow
+  , updateChangesetWithFallback
+
+    -- * Live Connection Pool Execution
+  , runInsertChangesetIO
+  , runInsertChangesetIOWith
+  , runUpdateChangesetIO
+  , runUpdateChangesetIOWith
 
     -- * Binary Wire Decoding
   , decodeReturningRow
@@ -57,7 +65,6 @@ module Hylo.PG.Mutation.Changeset
 import Control.DeepSeq (NFData (..))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.Kind (Type)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
@@ -84,7 +91,12 @@ import Hylo.Core.Transaction
 import Hylo.Core.TypeError (AssertWritable (..), TxMode (..), writableDict)
 import Hylo.PG.Codec.Binary
   ( RowCodec
+  , TableCodec (..)
   , runBinaryDecoder
+  )
+import Hylo.PG.Connection
+  ( Pool (..)
+  , executePreparedQuery
   )
 import Hylo.PG.Error.Translation
   ( DbError (..)
@@ -125,9 +137,7 @@ fromFieldErrors = \case
 -- 2. Table Codec
 --------------------------------------------------------------------------------
 
--- | Typeclass associating an HKD table with its canonical binary wire RowCodec.
-class TableCodec (table :: Ctx -> Type) where
-  tableCodec :: RowCodec (table 'Result) (table 'Result)
+-- Note: 'TableCodec' is re-exported from 'Hylo.PG.Codec.Binary'.
 
 -- | Decode RETURNING * binary wire output into hydrated domain record using 'Hylo.PG.Codec.Binary'.
 decodeReturningRow ::
@@ -329,6 +339,40 @@ insertChangesetWithRow schema codec wireBytes cs =
                     else -- Simulation hydration fallback
                       (Right (Right (errorWithoutStackTrace "insertChangeset: simulated entity hydration")), st')
 
+-- | Parameterized INSERT with a fallback entity for simulated / offline execution.
+insertChangesetWithFallback ::
+  forall table v (mode :: TxMode) op.
+  ( AssertWritable mode
+  , Table table
+  ) =>
+  TableSchema table ->
+  table 'Result ->
+  Changeset table op ->
+  Tx (Postgres v) mode (Either ChangesetError (table 'Result))
+insertChangesetWithFallback schema fallback cs =
+  writableDict (Proxy :: Proxy mode) `seq`
+    TxAction $ \st ->
+      if not (changesetValid cs) || not (null (changesetErrors cs))
+        then
+          let errs = case changesetErrors cs of
+                (e : es) -> e :| es
+                [] -> FieldError "" "invalid_changeset" "Changeset validation failed" :| []
+           in (Right (Left (ChangesetError errs)), st)
+        else case checkSimulatedConstraint schema cs st of
+          Just fe ->
+            (Right (Left (singleChangesetError fe)), st)
+          Nothing ->
+            let (sqlText, params) = renderInsertChangesetSQL schema cs
+                key = changesetKey cs
+                tName = tableName schema
+                newStore = if key /= "" then (tName, key) : txStore st else txStore st
+                st' =
+                  st
+                    { txOperations = txOperations st ++ [OpMutate (sqlText, params)]
+                    , txStore = newStore
+                    }
+             in (Right (Right fallback), st')
+
 {- | Statically guarded parameterized partial UPDATE using the canonical 'TableCodec'.
 
 Fails at compile-time with [Hylo Error E005] if evaluated within a 'ReadOnly' transaction.
@@ -399,6 +443,115 @@ updateChangesetWithRow schema codec wireBytes cs =
                       Right row -> (Right (Right row), st')
                     else -- Simulation hydration fallback
                       (Right (Right (errorWithoutStackTrace "updateChangeset: simulated entity hydration")), st')
+
+-- | Parameterized partial UPDATE with a fallback entity for simulated / offline execution.
+updateChangesetWithFallback ::
+  forall table v (mode :: TxMode) op.
+  ( AssertWritable mode
+  , Table table
+  ) =>
+  TableSchema table ->
+  table 'Result ->
+  Changeset table op ->
+  Tx (Postgres v) mode (Either ChangesetError (table 'Result))
+updateChangesetWithFallback schema fallback cs =
+  writableDict (Proxy :: Proxy mode) `seq`
+    TxAction $ \st ->
+      if not (changesetValid cs) || not (null (changesetErrors cs))
+        then
+          let errs = case changesetErrors cs of
+                (e : es) -> e :| es
+                [] -> FieldError "" "invalid_changeset" "Changeset validation failed" :| []
+           in (Right (Left (ChangesetError errs)), st)
+        else case checkSimulatedConstraint schema cs st of
+          Just fe ->
+            (Right (Left (singleChangesetError fe)), st)
+          Nothing ->
+            let (sqlText, params) = renderUpdateChangesetSQL schema cs
+                st' = st {txOperations = txOperations st ++ [OpMutate (sqlText, params)]}
+             in (Right (Right fallback), st')
+
+--------------------------------------------------------------------------------
+-- 6. Live Connection Pool Execution
+--------------------------------------------------------------------------------
+
+-- | Execute an INSERT changeset against live PostgreSQL and return the hydrated domain record.
+runInsertChangesetIO ::
+  forall table op.
+  (Table table, TableCodec table) =>
+  Pool ->
+  TableSchema table ->
+  Changeset table op ->
+  IO (Either ChangesetError (table 'Result))
+runInsertChangesetIO pool schema =
+  runInsertChangesetIOWith pool schema tableCodec
+
+-- | Execute an INSERT changeset against live PostgreSQL using an explicit 'RowCodec'.
+runInsertChangesetIOWith ::
+  forall table op.
+  (Table table) =>
+  Pool ->
+  TableSchema table ->
+  RowCodec (table 'Result) (table 'Result) ->
+  Changeset table op ->
+  IO (Either ChangesetError (table 'Result))
+runInsertChangesetIOWith pool schema codec cs =
+  if not (changesetValid cs) || not (null (changesetErrors cs))
+    then
+      let errs = case changesetErrors cs of
+            (e : es) -> e :| es
+            [] -> FieldError "" "invalid_changeset" "Changeset validation failed" :| []
+       in pure (Left (ChangesetError errs))
+    else do
+      let (sqlText, params) = renderInsertChangesetSQL schema cs
+          numCols = length (tableColDefs (tableMeta schema))
+      res <- executePreparedQuery pool sqlText params codec numCols
+      case res of
+        Left txErr -> pure (Left (translateTxConstraintViolation schema cs txErr))
+        Right [] ->
+          pure
+            ( Left
+                (singleChangesetError (FieldError "" "no_rows_returned" "INSERT ... RETURNING * returned no rows"))
+            )
+        Right (row : _) -> pure (Right row)
+
+-- | Execute an UPDATE changeset against live PostgreSQL and return the hydrated domain record.
+runUpdateChangesetIO ::
+  forall table op.
+  (Table table, TableCodec table) =>
+  Pool ->
+  TableSchema table ->
+  Changeset table op ->
+  IO (Either ChangesetError (table 'Result))
+runUpdateChangesetIO pool schema =
+  runUpdateChangesetIOWith pool schema tableCodec
+
+-- | Execute an UPDATE changeset against live PostgreSQL using an explicit 'RowCodec'.
+runUpdateChangesetIOWith ::
+  forall table op.
+  (Table table) =>
+  Pool ->
+  TableSchema table ->
+  RowCodec (table 'Result) (table 'Result) ->
+  Changeset table op ->
+  IO (Either ChangesetError (table 'Result))
+runUpdateChangesetIOWith pool schema codec cs =
+  if not (changesetValid cs) || not (null (changesetErrors cs))
+    then
+      let errs = case changesetErrors cs of
+            (e : es) -> e :| es
+            [] -> FieldError "" "invalid_changeset" "Changeset validation failed" :| []
+       in pure (Left (ChangesetError errs))
+    else do
+      let (sqlText, params) = renderUpdateChangesetSQL schema cs
+          numCols = length (tableColDefs (tableMeta schema))
+      res <- executePreparedQuery pool sqlText params codec numCols
+      case res of
+        Left txErr -> pure (Left (translateTxConstraintViolation schema cs txErr))
+        Right [] ->
+          pure
+            (Left (singleChangesetError (FieldError "" "not_found" "UPDATE ... RETURNING * returned no rows")))
+        Right (row : _) -> pure (Right row)
 
 --------------------------------------------------------------------------------
 -- 6. Error Translation Integration
