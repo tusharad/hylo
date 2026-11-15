@@ -51,10 +51,6 @@ import Hylo.Core
   , (==.)
   , (>.)
   )
-import qualified Hylo.MySQL as MySQL
-import qualified Hylo.PG as PG
-import qualified Hylo.Redis as Redis
-import qualified Hylo.SQLite as SQLite
 import Hylo.Core.Query
   ( AggExpr
   , Projectable (..)
@@ -337,20 +333,7 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
       batchLookupDict (Proxy @SQLite) `shouldBe` ()
 
   describe "Cross-Backend TableSchema Reference" $ do
-    it
-      "references a single TableSchema in Hylo.Core across hylo-pg, hylo-mysql, hylo-sqlite, and hylo-redis without type-conversion boilerplate"
-      $ do
-        let pgSql :: Text = PG.renderSQL (each userTable)
-        let mySql = MySQL.renderMySQLSQL (each userTable)
-        let sqliteSql = SQLite.renderSQLiteSQL (each userTable)
-        let redisCmd = Redis.renderRedisCmd (Redis.redisHGetCol userTable "42" (tableMeta userTable).email)
-        T.unpack pgSql `shouldContain` "FROM \"users\""
-        T.unpack mySql `shouldContain` "FROM \"users\""
-        T.unpack sqliteSql `shouldContain` "FROM \"users\""
-        redisCmd `shouldBe` "HGET users:42 email"
-
-  describe "Cross-Backend TableSchema Reference" $ do
-    it "references a single TableSchema in Hylo.Core across hylo-pg, hylo-mysql, hylo-sqlite, and hylo-redis without type-conversion boilerplate" $ do
+    it "references a single TableSchema across PG, MySQL, SQLite, and Redis" $ do
       let pgSql :: Text = PG.renderSQL (each userTable)
       let mySql = MySQL.renderMySQLSQL (each userTable)
       let sqliteSql = SQLite.renderSQLiteSQL (each userTable)
