@@ -31,6 +31,7 @@ module Hylo.Core.Query
   , where_
   , limit
   , offset
+  , leftJoin
   , ScopeId (..)
   , formatScope
   , generateScopes
@@ -43,6 +44,10 @@ module Hylo.Core.Query
   , Projectable (..)
   , renderExpr
   , exprAliases
+  , NullableTable (..)
+  , LiftMay
+  , liftNullableExpr
+  , unNullableTable
 
     -- * Expressions
   , module Hylo.Core.Expr
@@ -103,12 +108,19 @@ import Hylo.Core.Changeset
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr
 import Hylo.Core.Key (Id)
+import Hylo.Core.Nullable
+  ( LiftMay
+  , NullableTable (..)
+  , liftNullableExpr
+  , unNullableTable
+  )
 import Hylo.Core.Query.Monad
   ( FromRelation (..)
   , Query (..)
   , QueryState (..)
   , eachWith
   , initialQueryState
+  , leftJoin
   , limit
   , offset
   , runQuery

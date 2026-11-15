@@ -4,7 +4,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeOperators #-}
 
 {- |
 Module      : Hylo.SQL.Query.Window
@@ -23,8 +22,12 @@ module Hylo.SQL.Query.Window
 
     -- * Order Specifications
   , OrderSpec (..)
+  , OrderDirection (..)
+  , NullsOrder (..)
   , asc
   , desc
+  , nullsFirst
+  , nullsLast
   , ascNullsFirst
   , ascNullsLast
   , descNullsFirst
@@ -71,42 +74,35 @@ import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..), ToQExpr (..))
-import Hylo.Core.Query.Monad (Query (..), QueryState (..))
+import Hylo.Core.Query.Monad
+  ( NullsOrder (..)
+  , OrderBy (..)
+  , OrderDirection (..)
+  , OrderSpec (..)
+  , asc
+  , desc
+  , nullsFirst
+  , nullsLast
+  , renderOrderSpec
+  )
 import Hylo.SQL.AST (Projectable (..), renderExpr)
 import Hylo.SQL.Query.Aggregate (AggExpr (..))
 
--- | Order specification with direction and null placement semantics.
-newtype OrderSpec = OrderSpec
-  { unOrderSpec :: Text
-  }
-  deriving (Eq, Show)
-
-instance NFData OrderSpec where
-  rnf (OrderSpec t) = rnf t
-
--- | Ascending ordering specification.
-asc :: ToQExpr e a => e -> OrderSpec
-asc e = OrderSpec (renderExpr (toQExpr e) <> " ASC")
-
--- | Descending ordering specification.
-desc :: ToQExpr e a => e -> OrderSpec
-desc e = OrderSpec (renderExpr (toQExpr e) <> " DESC")
-
 -- | Ascending ordering specification with NULLS FIRST.
 ascNullsFirst :: ToQExpr e a => e -> OrderSpec
-ascNullsFirst e = OrderSpec (renderExpr (toQExpr e) <> " ASC NULLS FIRST")
+ascNullsFirst e = nullsFirst (asc e)
 
 -- | Ascending ordering specification with NULLS LAST.
 ascNullsLast :: ToQExpr e a => e -> OrderSpec
-ascNullsLast e = OrderSpec (renderExpr (toQExpr e) <> " ASC NULLS LAST")
+ascNullsLast e = nullsLast (asc e)
 
 -- | Descending ordering specification with NULLS FIRST.
 descNullsFirst :: ToQExpr e a => e -> OrderSpec
-descNullsFirst e = OrderSpec (renderExpr (toQExpr e) <> " DESC NULLS FIRST")
+descNullsFirst e = nullsFirst (desc e)
 
 -- | Descending ordering specification with NULLS LAST.
 descNullsLast :: ToQExpr e a => e -> OrderSpec
-descNullsLast e = OrderSpec (renderExpr (toQExpr e) <> " DESC NULLS LAST")
+descNullsLast e = nullsLast (desc e)
 
 -- | Frame boundary specification for window framing clauses.
 data FrameBound
@@ -187,17 +183,8 @@ instance (PartitionKey a, PartitionKey b, PartitionKey c) => PartitionKey (a, b,
 partitionBy :: PartitionKey k => k -> WindowDef -> WindowDef
 partitionBy k w = w {wdPartitions = wdPartitions w ++ renderPartitionKey k}
 
--- | Class overloading 'orderBy' across window specifications and monadic Query blocks.
-class OrderBy target where
-  orderBy :: [OrderSpec] -> target
-
 instance OrderBy (WindowDef -> WindowDef) where
-  orderBy specs w = w {wdOrders = wdOrders w ++ map unOrderSpec specs}
-
-instance (a ~ ()) => OrderBy (Query db a) where
-  orderBy specs = Query $ \s ->
-    let s' = s {qsOrderBy = qsOrderBy s ++ map unOrderSpec specs}
-     in ((), s')
+  orderBy specs w = w {wdOrders = wdOrders w ++ map renderOrderSpec specs}
 
 -- | Add a ROWS BETWEEN framing specification to a window definition.
 rowsBetween :: FrameBound -> FrameBound -> WindowDef -> WindowDef

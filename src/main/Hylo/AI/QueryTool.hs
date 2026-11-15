@@ -66,7 +66,12 @@ import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr (..), colExpr)
 import Hylo.Core.Query (select)
 import Hylo.Core.Query.Monad
-  ( Query
+  ( OrderBy (..)
+  , OrderDirection (..)
+  , OrderSpec
+  , Query
+  , asc
+  , desc
   , each
   , limit
   , offset
@@ -132,6 +137,20 @@ compileAgentQuery schema policy payload = case payload of
             (KeyMap.toList filterObj)
       Just _ -> Left (InvalidPayloadError "The 'filter' property must be a JSON object")
 
+    orderSpecs <- case KeyMap.lookup "orderBy" rootObj of
+      Nothing -> pure []
+      Just (Aeson.String s) -> do
+        spec <- parseOrderString allowed metaCols scopeAlias s
+        pure [spec]
+      Just (Aeson.Array arr) ->
+        mapM
+          ( \case
+              Aeson.String s -> parseOrderString allowed metaCols scopeAlias s
+              _ -> Left (InvalidPayloadError "Elements of 'orderBy' array must be strings")
+          )
+          (toList arr)
+      Just _ -> Left (InvalidPayloadError "The 'orderBy' property must be a string or array of strings")
+
     let mLstLimit = case KeyMap.lookup "limit" rootObj of
           Just (Aeson.Number n) -> case floatingOrInteger n of
             Right (i :: Integer) -> Just (min (fromIntegral i) (maxPageSize policy))
@@ -148,10 +167,44 @@ compileAgentQuery schema policy payload = case payload of
       record <- each schema
       where_ (mandatoryScope policy record)
       mapM_ where_ filterPreds
+      case orderSpecs of
+        [] -> pure ()
+        _ -> orderBy orderSpecs
       for_ mLstLimit limit
       for_ mOffsetVal offset
       pure record
   _ -> Left (InvalidPayloadError "Query payload must be a JSON object")
+
+-- | Parse an order specification string (e.g. "title:desc" or "created_at:asc").
+parseOrderString ::
+  [Text] ->
+  [(Text, Text)] ->
+  Text ->
+  Text ->
+  Either QueryToolError OrderSpec
+parseOrderString allowed metaCols scopeAlias str =
+  let trimmed = T.strip str
+      (colRaw, rest) = T.breakOn ":" trimmed
+      colTrimmed = T.strip colRaw
+      dir =
+        if T.null rest
+          then Asc
+          else case T.toLower (T.strip (T.drop 1 rest)) of
+            "desc" -> Desc
+            "asc" -> Asc
+            _ -> Asc
+   in if T.null colTrimmed
+        then Left (InvalidPayloadError "Empty column in 'orderBy' specification")
+        else
+          if not (isWhitelisted colTrimmed allowed)
+            then Left (ForbiddenColumnError colTrimmed)
+            else
+              let sqlCol = resolveSqlColumn metaCols colTrimmed
+                  colE = colExpr scopeAlias sqlCol
+                  spec = case dir of
+                    Asc -> asc colE
+                    Desc -> desc colE
+               in Right spec
 
 -- | Execute an agent tool query inside the effect-pure 'Tx' monad in 'ReadOnly' mode.
 executeAgentToolQuery ::

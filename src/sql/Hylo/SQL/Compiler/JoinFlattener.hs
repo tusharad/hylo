@@ -43,16 +43,20 @@ flattenJoins (r0 : rs) initialPreds =
     step (curFrom, curPreds, joinedAliases) r =
       let rAlias = rbAlias r
           validScopeAliases = rAlias : joinedAliases
-          isJoinPred p =
-            let aliases = exprAliases p
-             in rAlias `elem` aliases && all (`elem` validScopeAliases) aliases
-          (joinPreds, otherPreds) = partition isJoinPred curPreds
-          nextFrom = case joinPreds of
-            [] -> CrossJoin curFrom (FromTable (rbTableName r) rAlias)
-            (p : ps) ->
-              let combinedCond = foldl (BinOpExpr "AND") p ps
-               in InnerJoin curFrom (FromTable (rbTableName r) rAlias) combinedCond
-       in (nextFrom, otherPreds, rAlias : joinedAliases)
+       in case rbLeftJoinCond r of
+            Just onCond ->
+              (LeftJoin curFrom (FromTable (rbTableName r) rAlias) onCond, curPreds, rAlias : joinedAliases)
+            Nothing ->
+              let isJoinPred p =
+                    let aliases = exprAliases p
+                     in rAlias `elem` aliases && all (`elem` validScopeAliases) aliases
+                  (joinPreds, otherPreds) = partition isJoinPred curPreds
+                  nextFrom = case joinPreds of
+                    [] -> CrossJoin curFrom (FromTable (rbTableName r) rAlias)
+                    (p : ps) ->
+                      let combinedCond = foldl (BinOpExpr "AND") p ps
+                       in InnerJoin curFrom (FromTable (rbTableName r) rAlias) combinedCond
+               in (nextFrom, otherPreds, rAlias : joinedAliases)
 
 -- | Render an abstract ANSI SQL FROM clause item into formatted SQL Text.
 renderFromItem :: FromItem -> Text

@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -24,7 +25,9 @@ module Hylo.Core.Nullable
   , unNullableTable
   ) where
 
+import Control.DeepSeq (NFData (..))
 import Data.Kind (Type)
+import GHC.Generics (Generic)
 import GHC.Records (HasField (..))
 import Hylo.Core.Expr (QExpr (..))
 import Unsafe.Coerce (unsafeCoerce)
@@ -53,7 +56,10 @@ Notice: Defined without record field selectors to prevent conflict with GHC's
 built-in 'HasField' instances.
 -}
 newtype NullableTable exprRecord = NullableTable exprRecord
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+
+instance NFData exprRecord => NFData (NullableTable exprRecord) where
+  rnf (NullableTable r) = rnf r
 
 -- | Unwrap a 'NullableTable' into its underlying expression record.
 unNullableTable :: NullableTable exprRecord -> exprRecord
