@@ -58,10 +58,12 @@ module Hylo.SQL.Builder
   , CompiledQuery (..)
   , compileQuery
   , compileQueryAST
+  , previewQuery
+  , previewQueryForDialect
   ) where
 
 import Control.DeepSeq (NFData (..))
-import Control.Monad (replicateM)
+import Control.Monad (forM)
 import Control.Monad.Trans.State.Strict (State, get, put, runState)
 import Data.Char (isDigit)
 import Data.Foldable (toList)
@@ -87,6 +89,7 @@ import Hylo.SQL.AST
   ( FromItem (..)
   , LateralBinding (..)
   , Projectable (..)
+  , renderLockClause
   )
 import Hylo.SQL.Compiler.JoinFlattener (flattenJoins)
 import Hylo.SQL.Query.CTE (renderCTEs)
@@ -275,19 +278,22 @@ buildExpr d = \case
     "true" -> pure "TRUE"
     "false" -> pure "FALSE"
     "null" -> pure "NULL"
-    _ -> do
-      st <- get
-      let nextIdx = sbsParamCount st + 1
-          val = cleanParamValue t
-          pType = inferParamType val
-          param = BoundParam nextIdx val pType
-          ph = bindPlaceholder d nextIdx
-      put
-        st
-          { sbsParamCount = nextIdx
-          , sbsParams = sbsParams st |> param
-          }
-      pure (B.fromText ph)
+    _ ->
+      if T.isPrefixOf "(" t && T.isSuffixOf ")" t
+        then pure (B.fromText t)
+        else do
+          st <- get
+          let nextIdx = sbsParamCount st + 1
+              val = cleanParamValue t
+              pType = inferParamType val
+              param = BoundParam nextIdx val pType
+              ph = bindPlaceholder d nextIdx
+          put
+            st
+              { sbsParamCount = nextIdx
+              , sbsParams = sbsParams st |> param
+              }
+          pure (B.fromText ph)
   ColExpr rel col -> do
     mappedRel <- resolveRelationAlias rel
     pure (B.fromText (quoteScopedCol d mappedRel col))
@@ -327,17 +333,21 @@ buildExpr d = \case
       Just cond -> do
         condB <- buildExpr d cond
         pure (base <> " FILTER (WHERE " <> condB <> ")")
-  RowCmpExpr op cols _ nParams -> do
-    let lhs = "(" <> T.intercalate ", " (map (quoteIdentifier d) cols) <> ")"
-    phs <- replicateM nParams $ do
-      st <- get
-      let nextIdx = sbsParamCount st + 1
+  RowCmpExpr op cols _ vals _ -> do
+    st <- get
+    let rewrittenCols = map (rewriteProjection d (sbsAliasMap st)) cols
+        lhs = "(" <> T.intercalate ", " rewrittenCols <> ")"
+    phs <- forM vals $ \v -> do
+      stCur <- get
+      let nextIdx = sbsParamCount stCur + 1
+          val = cleanParamValue v
+          pType = inferParamType val
+          param = BoundParam nextIdx val pType
           ph = bindPlaceholder d nextIdx
-          param = BoundParam nextIdx "" "unknown"
       put
-        st
+        stCur
           { sbsParamCount = nextIdx
-          , sbsParams = sbsParams st |> param
+          , sbsParams = sbsParams stCur |> param
           }
       pure ph
     let rhs = "(" <> T.intercalate ", " phs <> ")"
@@ -418,12 +428,26 @@ compileQuery d q =
 -- | Compile a Query AST state and projection expressions into a CompiledQuery.
 compileQueryAST :: Dialect -> [Text] -> QueryState -> CompiledQuery
 compileQueryAST d rawProjections st =
-  let act = buildQueryParts d rawProjections st
-      (sqlBuilder, finalSt) = runSqlBuilderM d act
-   in CompiledQuery
-        { compiledSQL = toStrict (toLazyText sqlBuilder)
-        , compiledParams = sbsParams finalSt
+  case qsUpsert st of
+    Just upsertSql ->
+      CompiledQuery
+        { compiledSQL = upsertSql
+        , compiledParams = Seq.empty
         }
+    Nothing ->
+      case qsCustomQuery st of
+        Just customSql ->
+          CompiledQuery
+            { compiledSQL = customSql
+            , compiledParams = Seq.empty
+            }
+        Nothing ->
+          let act = buildQueryParts d rawProjections st
+              (sqlBuilder, finalSt) = runSqlBuilderM d act
+           in CompiledQuery
+                { compiledSQL = toStrict (toLazyText sqlBuilder)
+                , compiledParams = sbsParams finalSt
+                }
 
 -- | Internal builder composing all SQL clauses with dialect quoting and scope mapping.
 buildQueryParts :: Dialect -> [Text] -> QueryState -> SqlBuilderM Builder
@@ -489,15 +513,28 @@ buildQueryParts d rawProjections st = do
            in " ORDER BY " <> B.fromText (T.intercalate ", " rewrittenOrders)
 
   -- 7. LIMIT & OFFSET clauses
-  let limitClause = case qsLimit st of
-        Nothing -> ""
-        Just n -> " LIMIT " <> B.fromText (T.pack (show n))
-      offsetClause = case qsOffset st of
-        Nothing -> ""
-        Just n -> " OFFSET " <> B.fromText (T.pack (show n))
+  let limitOffsetClause = case d of
+        MySQLDialect -> case (qsLimit st, qsOffset st) of
+          (Nothing, Nothing) -> ""
+          (Just lim, Nothing) -> " LIMIT " <> B.fromText (T.pack (show lim))
+          (Nothing, Just off) -> " LIMIT 18446744073709551615 OFFSET " <> B.fromText (T.pack (show off))
+          (Just lim, Just off) -> " LIMIT " <> B.fromText (T.pack (show lim)) <> " OFFSET " <> B.fromText (T.pack (show off))
+        _ ->
+          let limitClause = case qsLimit st of
+                Nothing -> ""
+                Just n -> " LIMIT " <> B.fromText (T.pack (show n))
+              offsetClause = case qsOffset st of
+                Nothing -> ""
+                Just n -> " OFFSET " <> B.fromText (T.pack (show n))
+           in limitClause <> offsetClause
 
   -- 8. CTE clause
   let cteClause = if null (qsCTEs st) then "" else B.fromText (renderCTEs (qsCTEs st))
+
+  -- 9. Lock clause
+  let lockClause = case qsLock st of
+        Nothing -> ""
+        Just lk -> " " <> B.fromText (renderLockClause lk)
 
   pure
     ( cteClause
@@ -507,9 +544,51 @@ buildQueryParts d rawProjections st = do
         <> groupByClause
         <> havingClause
         <> orderByClause
-        <> limitClause
-        <> offsetClause
+        <> limitOffsetClause
+        <> lockClause
     )
+
+-- | Generate a debug/preview SQL string by interpolating bound parameters into the compiled query.
+previewQuery :: CompiledQuery -> Text
+previewQuery (CompiledQuery sql params) =
+  let paramList = toList params
+   in case paramList of
+        [] -> sql
+        _ ->
+          if T.isInfixOf "$1" sql
+            then foldl substPostgres sql paramList
+            else
+              if T.isInfixOf "?1" sql
+                then foldl substSqlite sql paramList
+                else replaceQMarks sql (map (\(BoundParam _ val pType) -> formatParamValue val pType) paramList)
+  where
+    substPostgres acc (BoundParam idx val pType) =
+      T.replace ("$" <> T.pack (show idx)) (formatParamValue val pType) acc
+    substSqlite acc (BoundParam idx val pType) =
+      T.replace ("?" <> T.pack (show idx)) (formatParamValue val pType) acc
+    replaceQMarks text [] = text
+    replaceQMarks text (val : vs) = case T.breakOn "?" text of
+      (before, after)
+        | T.null after -> before
+        | otherwise -> before <> val <> replaceQMarks (T.drop 1 after) vs
+
+-- | Generate a preview SQL string explicitly specifying the dialect.
+previewQueryForDialect :: Dialect -> CompiledQuery -> Text
+previewQueryForDialect MySQLDialect (CompiledQuery sql params) =
+  replaceQMarks sql (map (\(BoundParam _ val pType) -> formatParamValue val pType) (toList params))
+  where
+    replaceQMarks text [] = text
+    replaceQMarks text (val : vs) = case T.breakOn "?" text of
+      (before, after)
+        | T.null after -> before
+        | otherwise -> before <> val <> replaceQMarks (T.drop 1 after) vs
+previewQueryForDialect _ cq = previewQuery cq
+
+-- | Format a bound parameter value for preview SQL interpolation.
+formatParamValue :: Text -> Text -> Text
+formatParamValue val pType
+  | pType == "integer" || pType == "numeric" || pType == "boolean" = val
+  | otherwise = "'" <> T.replace "'" "''" val <> "'"
 
 -- | Rewrite a projection column reference with dialect identifier quoting and alias substitution.
 rewriteProjection :: Dialect -> Map Text Text -> Text -> Text

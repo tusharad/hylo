@@ -10,9 +10,18 @@ module Hylo.MySQL
     MySQL
 
     -- * MySQL Dialect Compiler
+  , compileMySQLQuery
+  , compileMySQLSQL
   , renderMySQLSQL
   , renderMySQLSQLText
+  , previewMySQLSQL
   ) where
 
 import Hylo.Backend.Capability (MySQL)
-import Hylo.MySQL.Compiler (renderMySQLSQL, renderMySQLSQLText)
+import Hylo.MySQL.Compiler
+  ( compileMySQLQuery
+  , compileMySQLSQL
+  , previewMySQLSQL
+  , renderMySQLSQL
+  , renderMySQLSQLText
+  )

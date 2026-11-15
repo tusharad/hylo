@@ -148,7 +148,7 @@ spec = describe "Epic 5: Correlated Subquery Lowering (LATERAL N+1 Eradication)"
           sql = renderSQL q
       sql `shouldContain` "LEFT JOIN LATERAL ("
       sql `shouldContain` "jsonb_agg(to_jsonb(\"projects_1\".*))"
-      sql `shouldContain` ") AS \"lat_0\" ON TRUE"
+      sql `shouldContain` ") AS \"t1\" ON TRUE"
       sql `shouldNotContain` "SELECT * FROM projects WHERE org_id ="
 
   describe "Contract Elicitation: Formal Laws" $ do
@@ -190,6 +190,6 @@ spec = describe "Epic 5: Correlated Subquery Lowering (LATERAL N+1 Eradication)"
           sql = renderSQL q
       sql `shouldContain` "LEFT JOIN LATERAL ("
       sql `shouldContain` "jsonb_agg(to_jsonb(\"projects_1\".*))"
+      sql `shouldContain` ") AS \"t1\" ON TRUE"
       sql `shouldContain` ") AS \"lat_0\" ON TRUE"
-      sql `shouldContain` ") AS \"lat_1\" ON TRUE"
       sql `shouldNotContain` "SELECT * FROM tasks WHERE"

@@ -72,16 +72,21 @@ module Hylo.Core.Query
   , delete
 
     -- * Cross-Backend Dialect Renderers
+  , compileStandardSQL
+  , compileStandardQuery
   , renderPostgresSQL
   , renderSQLiteSQL
   , renderStandardSQLText
+  , previewPostgresSQL
+  , previewSQLiteSQL
+  , previewStandardSQL
   )
 where
 
 import Data.Int (Int64)
 import Data.Proxy (Proxy (..))
+import Data.Sequence (Seq)
 import Data.Text (Text)
-import qualified Data.Text as T
 import Hylo.Backend.Capability
   ( MySQL
   , PGVersion (..)
@@ -115,7 +120,6 @@ import Hylo.Core.Transaction
 import Hylo.Core.TypeError (AssertWritable (..))
 import Hylo.SQL.AST
   ( FromItem (..)
-  , LateralBinding (..)
   , LockClause (..)
   , LockStrength (..)
   , LockWait (..)
@@ -128,7 +132,13 @@ import Hylo.SQL.AST
   , renderExpr
   , renderLockClause
   )
-import Hylo.SQL.Compiler.JoinFlattener (flattenJoins, renderFromItem)
+import Hylo.SQL.Builder
+  ( BoundParam (..)
+  , CompiledQuery (..)
+  , Dialect (..)
+  , compileQuery
+  , previewQuery
+  )
 import Hylo.SQL.Query.Aggregate
 import Hylo.SQL.Query.Recursive
 import Hylo.SQL.Query.Window
@@ -188,79 +198,39 @@ delete schema _ =
        in (Right (), st')
 
 --------------------------------------------------------------------------------
--- Cross-Backend Dialect Renderers
+-- Cross-Backend Dialect Compilers & Renderers
 --------------------------------------------------------------------------------
+
+-- | Compile a generic Query into a CompiledQuery with bound parameters.
+compileStandardQuery :: (Projectable a) => Dialect -> Query db a -> CompiledQuery
+compileStandardQuery = compileQuery
+
+-- | Compile a generic Query into SQL text and strict bound parameters sequence.
+compileStandardSQL :: (Projectable a) => Query db a -> (Text, Seq BoundParam)
+compileStandardSQL q =
+  let cq = compileQuery PostgresDialect q
+   in (compiledSQL cq, compiledParams cq)
 
 -- | Generic ANSI SQL query renderer.
 renderStandardSQLText :: (Projectable a) => Query db a -> Text
-renderStandardSQLText q =
-  let (res, st) = runQuery q initialQueryState
-   in case qsUpsert st of
-        Just upsertSql -> upsertSql
-        Nothing ->
-          case qsCustomQuery st of
-            Just customSql -> customSql
-            Nothing ->
-              let cteClause = renderCTEs (qsCTEs st)
-                  projections = projectColumns res
-                  selectClause =
-                    "SELECT "
-                      <> (if null projections then "1" else T.intercalate ", " projections)
-                  (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
-                  mFromWithLaterals = case mFrom of
-                    Nothing -> case qsLaterals st of
-                      [] -> Nothing
-                      (l : ls) ->
-                        Just $
-                          foldl
-                            (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-                            (FromTable (lbAlias l) (lbAlias l))
-                            ls
-                    Just baseItem ->
-                      Just $
-                        foldl
-                          (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-                          baseItem
-                          (qsLaterals st)
-                  fromClause = case mFromWithLaterals of
-                    Nothing -> ""
-                    Just item -> " FROM " <> renderFromItem item
-                  whereClause = case wherePreds of
-                    [] -> ""
-                    (p : ps) ->
-                      let combined = foldl (BinOpExpr "AND") p ps
-                       in " WHERE " <> renderExpr combined
-                  groupByClause = case qsGroupBy st of
-                    [] -> ""
-                    cols -> " GROUP BY " <> T.intercalate ", " cols
-                  havingClause = case qsHaving st of
-                    [] -> ""
-                    (h : hs) ->
-                      let combined = foldl (BinOpExpr "AND") h hs
-                       in " HAVING " <> renderExpr combined
-                  orderByClause = case qsOrderBy st of
-                    [] -> ""
-                    orders -> " ORDER BY " <> T.intercalate ", " orders
-                  limitClause = case qsLimit st of
-                    Nothing -> ""
-                    Just n -> " LIMIT " <> T.pack (show n)
-                  offsetClause = case qsOffset st of
-                    Nothing -> ""
-                    Just n -> " OFFSET " <> T.pack (show n)
-               in cteClause
-                    <> selectClause
-                    <> fromClause
-                    <> whereClause
-                    <> groupByClause
-                    <> havingClause
-                    <> orderByClause
-                    <> limitClause
-                    <> offsetClause
+renderStandardSQLText q = compiledSQL (compileQuery PostgresDialect q)
 
 -- | Render a Query into strict Text SQL representation for PostgreSQL.
 renderPostgresSQL :: (Projectable a) => Query (Postgres v) a -> Text
-renderPostgresSQL = renderStandardSQLText
+renderPostgresSQL q = compiledSQL (compileQuery PostgresDialect q)
 
 -- | Render a Query into strict Text SQL representation for SQLite.
 renderSQLiteSQL :: (Projectable a) => Query SQLite a -> Text
-renderSQLiteSQL = renderStandardSQLText
+renderSQLiteSQL q = compiledSQL (compileQuery SQLiteDialect q)
+
+-- | Generate a debug/preview SQL string by interpolating bound parameters.
+previewStandardSQL :: (Projectable a) => Query db a -> Text
+previewStandardSQL q = previewQuery (compileQuery PostgresDialect q)
+
+-- | Generate a debug/preview SQL string for PostgreSQL.
+previewPostgresSQL :: (Projectable a) => Query (Postgres v) a -> Text
+previewPostgresSQL q = previewQuery (compileQuery PostgresDialect q)
+
+-- | Generate a debug/preview SQL string for SQLite.
+previewSQLiteSQL :: (Projectable a) => Query SQLite a -> Text
+previewSQLiteSQL q = previewQuery (compileQuery SQLiteDialect q)

@@ -60,7 +60,7 @@ data QExpr (a :: Type) where
   CoalesceExpr :: !(QExpr (Maybe a)) -> !(QExpr a) -> QExpr a
   AggOpExpr :: !Text -> !(QExpr a) -> !(Maybe (QExpr Bool)) -> QExpr b
   StringAggExpr :: !(QExpr Text) -> !(QExpr Text) -> !(Maybe (QExpr Bool)) -> QExpr Text
-  RowCmpExpr :: !Text -> ![Text] -> ![Text] -> !Int -> QExpr Bool
+  RowCmpExpr :: !Text -> ![Text] -> ![Text] -> ![Text] -> !Int -> QExpr Bool
 
 instance Show (QExpr a) where
   showsPrec d expr = case expr of
@@ -105,7 +105,7 @@ instance Show (QExpr a) where
           . shows delim
           . showString " "
           . shows mFilter
-    RowCmpExpr op cols aliases n ->
+    RowCmpExpr op cols aliases vals n ->
       showParen (d > 10) $
         showString "RowCmpExpr "
           . shows op
@@ -113,6 +113,8 @@ instance Show (QExpr a) where
           . shows cols
           . showString " "
           . shows aliases
+          . showString " "
+          . shows vals
           . showString " "
           . shows n
 
@@ -129,8 +131,8 @@ instance Eq (QExpr a) where
     f1 == f2 && show a1 == show a2 && show m1 == show m2
   StringAggExpr a1 d1 m1 == StringAggExpr a2 d2 m2 =
     show a1 == show a2 && show d1 == show d2 && show m1 == show m2
-  RowCmpExpr o1 c1 a1 n1 == RowCmpExpr o2 c2 a2 n2 =
-    o1 == o2 && c1 == c2 && a1 == a2 && n1 == n2
+  RowCmpExpr o1 c1 a1 v1 n1 == RowCmpExpr o2 c2 a2 v2 n2 =
+    o1 == o2 && c1 == c2 && a1 == a2 && v1 == v2 && n1 == n2
   _ == _ = False
 
 -- | Construct a literal expression from any Show-able value.

@@ -10,9 +10,18 @@ module Hylo.SQLite
     SQLite
 
     -- * SQLite Dialect Compiler
+  , compileSQLiteQuery
+  , compileSQLiteSQL
   , renderSQLiteSQL
   , renderSQLiteSQLText
+  , previewSQLiteSQL
   ) where
 
 import Hylo.Backend.Capability (SQLite)
-import Hylo.SQLite.Compiler (renderSQLiteSQL, renderSQLiteSQLText)
+import Hylo.SQLite.Compiler
+  ( compileSQLiteQuery
+  , compileSQLiteSQL
+  , previewSQLiteSQL
+  , renderSQLiteSQL
+  , renderSQLiteSQLText
+  )

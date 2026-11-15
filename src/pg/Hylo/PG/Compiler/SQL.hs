@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 {- |
 Module      : Hylo.PG.Compiler.SQL
 Description : High-level SQL code generator from operational Query AST
@@ -8,108 +6,51 @@ License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
 -}
 module Hylo.PG.Compiler.SQL
-  ( renderSQL
+  ( compilePostgresQuery
+  , compilePostgresSQL
+  , renderSQL
   , renderSQLText
   , renderPostgresSQL
+  , previewPostgresSQL
   ) where
 
+import Data.Sequence (Seq)
 import Data.String (IsString (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Backend.Capability (Postgres)
-import Hylo.Core.Expr (QExpr (..))
-import Hylo.Core.Query.Monad
-  ( Query (..)
-  , QueryState (..)
-  , initialQueryState
+import Hylo.Core.Query.Monad (Query (..))
+import Hylo.SQL.AST (Projectable (..))
+import Hylo.SQL.Builder
+  ( BoundParam (..)
+  , CompiledQuery (..)
+  , Dialect (PostgresDialect)
+  , compileQuery
+  , previewQuery
   )
-import Hylo.PG.Compiler.JoinFlattener
-  ( flattenJoins
-  , renderFromItem
-  )
-import Hylo.SQL.AST
-  ( FromItem (..)
-  , LateralBinding (..)
-  , Projectable (..)
-  , renderExpr
-  , renderLockClause
-  )
-import Hylo.SQL.Query.CTE (renderCTEs)
+
+-- | Compile a PostgreSQL query into a CompiledQuery with bound parameters.
+compilePostgresQuery :: Projectable a => Query (Postgres v) a -> CompiledQuery
+compilePostgresQuery = compileQuery PostgresDialect
+
+-- | Compile a PostgreSQL query returning SQL text and strict bound parameters sequence.
+compilePostgresSQL :: Projectable a => Query (Postgres v) a -> (Text, Seq BoundParam)
+compilePostgresSQL q =
+  let cq = compilePostgresQuery q
+   in (compiledSQL cq, compiledParams cq)
 
 -- | Render a Query into strict Text SQL representation for PostgreSQL.
 renderPostgresSQL :: Projectable a => Query (Postgres v) a -> Text
-renderPostgresSQL = renderSQLText
-
--- | Render a Query into polymorphic string/text SQL representation.
-renderSQL :: (Projectable a, IsString s) => Query (Postgres v) a -> s
-renderSQL q = fromString (T.unpack (renderSQLText q))
+renderPostgresSQL = compiledSQL . compilePostgresQuery
 
 -- | Render a Query into strict Text SQL representation.
 renderSQLText :: Projectable a => Query (Postgres v) a -> Text
-renderSQLText q =
-  let (res, st) = runQuery q initialQueryState
-   in case qsUpsert st of
-        Just upsertSql -> upsertSql
-        Nothing ->
-          case qsCustomQuery st of
-            Just customSql -> customSql
-            Nothing ->
-              let cteClause = renderCTEs (qsCTEs st)
-                  projections = projectColumns res
-                  selectClause =
-                    "SELECT "
-                      <> (if null projections then "1" else T.intercalate ", " projections)
-                  (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
-                  mFromWithLaterals = case mFrom of
-                    Nothing -> case qsLaterals st of
-                      [] -> Nothing
-                      (l : ls) ->
-                        Just $
-                          foldl
-                            (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-                            (FromTable (lbAlias l) (lbAlias l))
-                            ls
-                    Just baseItem ->
-                      Just $
-                        foldl
-                          (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-                          baseItem
-                          (qsLaterals st)
-                  fromClause = case mFromWithLaterals of
-                    Nothing -> ""
-                    Just item -> " FROM " <> renderFromItem item
-                  whereClause = case wherePreds of
-                    [] -> ""
-                    (p : ps) ->
-                      let combined = foldl (BinOpExpr "AND") p ps
-                       in " WHERE " <> renderExpr combined
-                  groupByClause = case qsGroupBy st of
-                    [] -> ""
-                    cols -> " GROUP BY " <> T.intercalate ", " cols
-                  havingClause = case qsHaving st of
-                    [] -> ""
-                    (h : hs) ->
-                      let combined = foldl (BinOpExpr "AND") h hs
-                       in " HAVING " <> renderExpr combined
-                  orderByClause = case qsOrderBy st of
-                    [] -> ""
-                    orders -> " ORDER BY " <> T.intercalate ", " orders
-                  limitClause = case qsLimit st of
-                    Nothing -> ""
-                    Just n -> " LIMIT " <> T.pack (show n)
-                  offsetClause = case qsOffset st of
-                    Nothing -> ""
-                    Just n -> " OFFSET " <> T.pack (show n)
-                  lockClause = case qsLock st of
-                    Nothing -> ""
-                    Just lk -> " " <> renderLockClause lk
-               in cteClause
-                    <> selectClause
-                    <> fromClause
-                    <> whereClause
-                    <> groupByClause
-                    <> havingClause
-                    <> orderByClause
-                    <> limitClause
-                    <> offsetClause
-                    <> lockClause
+renderSQLText = renderPostgresSQL
+
+-- | Render a Query into polymorphic string/text SQL representation.
+renderSQL :: (Projectable a, IsString s) => Query (Postgres v) a -> s
+renderSQL q = fromString (T.unpack (renderPostgresSQL q))
+
+-- | Generate a debug/preview SQL string by interpolating bound parameters.
+previewPostgresSQL :: Projectable a => Query (Postgres v) a -> Text
+previewPostgresSQL = previewQuery . compilePostgresQuery

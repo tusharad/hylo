@@ -54,7 +54,7 @@ import Hylo.Core.Transaction
   , executeTx
   , initialTxState
   )
-import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.PG.Compiler.SQL (compilePostgresSQL, previewPostgresSQL)
 import Hylo.SQL.AST (Projectable (..), renderExpr)
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
@@ -140,7 +140,7 @@ compileSQL ::
   (Table table, Projectable (table 'Expr)) =>
   TableSchema table -> AgentPolicy table -> Aeson.Value -> String
 compileSQL schema policy payload = case compileAgentQuery schema policy payload of
-  Right q -> renderSQL q
+  Right q -> T.unpack (previewPostgresSQL q)
   Left err -> errorWithoutStackTrace ("compileAgentQuery failed: " ++ show err)
 
 spec :: Spec
@@ -162,9 +162,14 @@ spec = describe "Epic 17: Sandboxed Structured Agent Query Compiler" $ do
               }
       case compileAgentQuery docTable policy userPayload of
         Right q -> do
-          let sql = renderSQL q
-          sql `shouldContain` "(\"documents_0\".\"org_id\" = 42)"
-          sql `shouldContain` "(\"documents_0\".\"title\" = 'Spec')"
+          let (sqlText, params) = compilePostgresSQL q
+              sql = T.unpack sqlText
+          sql `shouldContain` "(\"t0\".\"org_id\" = $1)"
+          sql `shouldContain` "(\"t0\".\"title\" = $2)"
+          length params `shouldBe` 2
+          let preview = T.unpack (previewPostgresSQL q)
+          preview `shouldContain` "(\"t0\".\"org_id\" = 42)"
+          preview `shouldContain` "(\"t0\".\"title\" = 'Spec')"
         Left err -> expectationFailure ("Unexpected error: " ++ show err)
 
   describe "Contract Elicitation: Formal Laws" $ do
@@ -189,12 +194,19 @@ spec = describe "Epic 17: Sandboxed Structured Agent Query Compiler" $ do
                 }
         case compileAgentQuery docTable policy payload of
           Right q -> do
-            let sql :: String = renderSQL q
-                expectedOrg = "(\"documents_0\".\"org_id\" = " ++ show orgVal ++ ")"
-                expectedTitle = "(\"documents_0\".\"title\" = '" ++ T.unpack titleText ++ "')"
+            let (sqlText, params) = compilePostgresSQL q
+                sql = T.unpack sqlText
+                expectedOrg = "(\"t0\".\"org_id\" = $1)"
+                expectedTitle = "(\"t0\".\"title\" = $2)"
             sql `shouldContain` expectedOrg
             sql `shouldContain` expectedTitle
             sql `shouldContain` " AND "
+            length params `shouldBe` 2
+            let preview = T.unpack (previewPostgresSQL q)
+                previewOrg = "(\"t0\".\"org_id\" = " ++ show orgVal ++ ")"
+                previewTitle = "(\"t0\".\"title\" = '" ++ T.unpack titleText ++ "')"
+            preview `shouldContain` previewOrg
+            preview `shouldContain` previewTitle
           Left err -> expectationFailure ("Unexpected compilation error: " ++ show err)
 
     it
@@ -248,40 +260,40 @@ spec = describe "Epic 17: Sandboxed Structured Agent Query Compiler" $ do
       let payload = [json| { "filter": { "title": { "$ne": "Archived" } } } |]
           policy = defaultPolicy {allowedFilterCols = ["title"]}
           sql = compileSQL docTable policy payload
-      sql `shouldContain` "(\"documents_0\".\"title\" <> 'Archived')"
+      sql `shouldContain` "(\"t0\".\"title\" <> 'Archived')"
 
     it "compiles $gt and $lt comparison filters" $ do
       let payload = [json| { "filter": { "salary": { "$gt": 50000, "$lt": 150000 } } } |]
           policy = defaultPolicy {allowedFilterCols = ["salary"]}
           sql = compileSQL docTable policy payload
-      sql `shouldContain` "(\"documents_0\".\"salary\" > 50000)"
-      sql `shouldContain` "(\"documents_0\".\"salary\" < 150000)"
+      sql `shouldContain` "(\"t0\".\"salary\" > 50000)"
+      sql `shouldContain` "(\"t0\".\"salary\" < 150000)"
 
     it "compiles $gte and $lte comparison filters" $ do
       let payload = [json| { "filter": { "salary": { "$gte": 1000, "$lte": 9999 } } } |]
           policy = defaultPolicy {allowedFilterCols = ["salary"]}
           sql = compileSQL docTable policy payload
-      sql `shouldContain` "(\"documents_0\".\"salary\" >= 1000)"
-      sql `shouldContain` "(\"documents_0\".\"salary\" <= 9999)"
+      sql `shouldContain` "(\"t0\".\"salary\" >= 1000)"
+      sql `shouldContain` "(\"t0\".\"salary\" <= 9999)"
 
     it "compiles $in array inclusion filter" $ do
       let payload = [json| { "filter": { "title": { "$in": ["Draft", "Published"] } } } |]
           policy = defaultPolicy {allowedFilterCols = ["title"]}
           sql = compileSQL docTable policy payload
-      sql `shouldContain` "(\"documents_0\".\"title\" IN ('Draft', 'Published'))"
+      sql `shouldContain` "(\"t0\".\"title\" IN ('Draft', 'Published'))"
 
     it "compiles $nin array exclusion filter" $ do
       let payload = [json| { "filter": { "title": { "$nin": ["Spam", "Deleted"] } } } |]
           policy = defaultPolicy {allowedFilterCols = ["title"]}
           sql = compileSQL docTable policy payload
-      sql `shouldContain` "(\"documents_0\".\"title\" NOT IN ('Spam', 'Deleted'))"
+      sql `shouldContain` "(\"t0\".\"title\" NOT IN ('Spam', 'Deleted'))"
 
     it "compiles $like and $ilike pattern matching filters" $ do
       let payload = [json| { "filter": { "title": { "$like": "%Report%", "$ilike": "%q1%" } } } |]
           policy = defaultPolicy {allowedFilterCols = ["title"]}
           sql = compileSQL docTable policy payload
-      sql `shouldContain` "(\"documents_0\".\"title\" LIKE '%Report%')"
-      sql `shouldContain` "(\"documents_0\".\"title\" ILIKE '%q1%')"
+      sql `shouldContain` "(\"t0\".\"title\" LIKE '%Report%')"
+      sql `shouldContain` "(\"t0\".\"title\" ILIKE '%q1%')"
 
     it "compiles $isNull check filters" $ do
       let payloadNull = [json| { "filter": { "title": { "$isNull": true } } } |]
@@ -289,14 +301,14 @@ spec = describe "Epic 17: Sandboxed Structured Agent Query Compiler" $ do
           policy = defaultPolicy {allowedFilterCols = ["title"]}
           sqlNull = compileSQL docTable policy payloadNull
           sqlNotNull = compileSQL docTable policy payloadNotNull
-      sqlNull `shouldContain` "(\"documents_0\".\"title\" IS NULL)"
-      sqlNotNull `shouldContain` "(\"documents_0\".\"title\" IS NOT NULL)"
+      sqlNull `shouldContain` "(\"t0\".\"title\" IS NULL)"
+      sqlNotNull `shouldContain` "(\"t0\".\"title\" IS NOT NULL)"
 
     it "supports implicit equality shorthand filters" $ do
       let payload = [json| { "filter": { "title": "DirectMatch" } } |]
           policy = defaultPolicy {allowedFilterCols = ["title"]}
           sql = compileSQL docTable policy payload
-      sql `shouldContain` "(\"documents_0\".\"title\" = 'DirectMatch')"
+      sql `shouldContain` "(\"t0\".\"title\" = 'DirectMatch')"
 
     it "rejects invalid operator tokens with descriptive error" $ do
       let payload = [json| { "filter": { "title": { "$hackOperator": "bad" } } } |]

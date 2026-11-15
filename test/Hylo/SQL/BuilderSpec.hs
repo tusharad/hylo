@@ -25,8 +25,10 @@ import Data.Foldable (toList)
 import Data.Int (Int64)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time (UTCTime (..), fromGregorian, secondsToDiffTime)
 import GHC.Generics (Generic)
 import Hylo.Core
+import Hylo.MySQL.Compiler (compileMySQLQuery)
 import Hylo.SQL
 import Test.Hspec
 import Test.QuickCheck
@@ -71,6 +73,34 @@ employeeTable =
       , name = column "name" "text"
       , managerId = foreignKey "manager_id" "bigint"
       , age = column "age" "bigint"
+      }
+
+data UserT (ctx :: Ctx) = User
+  { id :: !(Col ctx Int64)
+  , name :: !(Col ctx Text)
+  , createdAt :: !(Col ctx UTCTime)
+  }
+  deriving (Generic)
+
+instance Table UserT where
+  toTableExpr alias meta =
+    User
+      { id = colSpecExpr alias meta.id
+      , name = colSpecExpr alias meta.name
+      , createdAt = colSpecExpr alias meta.createdAt
+      }
+  tableExprColumns expr =
+    [ renderExpr expr.id
+    , renderExpr expr.name
+    ]
+
+userTable :: TableSchema UserT
+userTable =
+  tableSchema "users" $
+    User
+      { id = column "id" "bigint"
+      , name = column "name" "text"
+      , createdAt = column "created_at" "timestamp"
       }
 
 --------------------------------------------------------------------------------
@@ -234,3 +264,33 @@ spec = describe "User Story 4: Parameterized Multi-Dialect SqlBuilder" $ do
     it "SQLite placeholders start with '?' and end with index string" $ do
       property $ \(Positive (idx :: Int)) ->
         bindPlaceholder SQLiteDialect idx == "?" <> T.pack (show idx)
+
+  describe "User Story 7: Wire Hylo.SQL.Builder Across All Dialect Compilers & Fix Pagination" $ do
+    it
+      "Acceptance Criterion 1: Compiling a MySQL query with where_ (u.name ==. lit \"Alice\") via Hylo.MySQL.Compiler produces SELECT `t0`.`id`, `t0`.`name` FROM `users` AS `t0` WHERE (`t0`.`name` = ?) with [BoundParam 1 \"Alice\" \"text\"]"
+      $ do
+        let q :: Query MySQL (Col 'Expr Int64, Col 'Expr Text)
+            q = do
+              u <- each userTable
+              where_ (u.name ==. lit ("Alice" :: Text))
+              pure (u.id, u.name)
+            cq = compileMySQLQuery q
+        compiledSQL cq
+          `shouldBe` "SELECT `t0`.`id`, `t0`.`name` FROM `users` AS `t0` WHERE (`t0`.`name` = ?)"
+        toList (compiledParams cq) `shouldBe` [BoundParam 1 "Alice" "text"]
+
+    it
+      "Acceptance Criterion 2: Calling seekAfter (u.createdAt, u.id) (t, 42) binds both t and 42 into compiledParams in the exact keyset order"
+      $ do
+        let t :: UTCTime
+            t = UTCTime (fromGregorian 2026 11 15) (secondsToDiffTime (20 * 3600))
+            q :: Query (Postgres 'PG17) (Col 'Expr Int64, Col 'Expr Text)
+            q = do
+              u <- each userTable
+              seekAfter (u.createdAt, u.id) (t, 42 :: Int64)
+              pure (u.id, u.name)
+            cq = compileQuery PostgresDialect q
+        toList (compiledParams cq)
+          `shouldBe` [ BoundParam 1 "2026-11-15 20:00:00 UTC" "text"
+                     , BoundParam 2 "42" "integer"
+                     ]

@@ -116,9 +116,9 @@ spec = describe "Epic 6: Type-Safe Aggregations & Grouping" $ do
             pure (orgId, totalActive, totalSpend)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "GROUP BY \"users_0\".\"org_id\""
-      sql `shouldContain` "COUNT(\"users_0\".\"id\") FILTER (WHERE (\"users_0\".\"active\" = TRUE))"
-      sql `shouldContain` "HAVING (SUM(\"users_0\".\"total_spend\") > 1000)"
+      sql `shouldContain` "GROUP BY \"t0\".\"org_id\""
+      sql `shouldContain` "COUNT(\"t0\".\"id\") FILTER (WHERE (\"t0\".\"active\" = TRUE))"
+      sql `shouldContain` "HAVING (SUM(\"t0\".\"total_spend\") > $1)"
 
     it "statically rejects selecting ungrouped columns outside aggregate functions" $
       shouldNotTypecheckWith
@@ -170,9 +170,9 @@ spec = describe "Epic 6: Type-Safe Aggregations & Grouping" $ do
           sql :: String
           sql = renderSQL q
       sql
-        `shouldContain` "AVG(\"users_0\".\"total_spend\") FILTER (WHERE (\"users_0\".\"active\" = TRUE))"
-      sql `shouldContain` "MIN(\"users_0\".\"total_spend\")"
-      sql `shouldContain` "MAX(\"users_0\".\"total_spend\")"
+        `shouldContain` "AVG(\"t0\".\"total_spend\") FILTER (WHERE (\"t0\".\"active\" = TRUE))"
+      sql `shouldContain` "MIN(\"t0\".\"total_spend\")"
+      sql `shouldContain` "MAX(\"t0\".\"total_spend\")"
 
     it "compiles arrayAgg and stringAgg functions" $ do
       let q = do
@@ -184,8 +184,8 @@ spec = describe "Epic 6: Type-Safe Aggregations & Grouping" $ do
               pure (u.orgId, ids, emails)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "array_agg(\"users_0\".\"id\")"
-      sql `shouldContain` "string_agg(\"users_0\".\"email\", \", \")"
+      sql `shouldContain` "array_agg(\"t0\".\"id\")"
+      sql `shouldContain` "string_agg(\"t0\".\"email\", \", \")"
 
     it "supports composite multi-column groupBy tuples" $ do
       let q = do
@@ -196,7 +196,7 @@ spec = describe "Epic 6: Type-Safe Aggregations & Grouping" $ do
               pure (u.orgId, u.active, totalUsers)
           sql :: String
           sql = renderSQL q
-      sql `shouldContain` "GROUP BY \"users_0\".\"org_id\", \"users_0\".\"active\""
+      sql `shouldContain` "GROUP BY \"t0\".\"org_id\", \"t0\".\"active\""
 
     it "supports filter_ modifier directly on arbitrary aggregates" $ do
       let q = do
@@ -208,4 +208,4 @@ spec = describe "Epic 6: Type-Safe Aggregations & Grouping" $ do
           sql :: String
           sql = renderSQL q
       sql
-        `shouldContain` "SUM(\"users_0\".\"total_spend\") FILTER (WHERE (\"users_0\".\"active\" = TRUE))"
+        `shouldContain` "SUM(\"t0\".\"total_spend\") FILTER (WHERE (\"t0\".\"active\" = TRUE))"

@@ -239,7 +239,7 @@ parseOperator alias sqlCol (opKey, opVal) =
 -- | Convert a JSON primitive value into a typed SQL expression 'QExpr a'.
 valueToExpr :: Aeson.Value -> Either QueryToolError (QExpr a)
 valueToExpr = \case
-  Aeson.String s -> Right (LitExpr ("'" <> escapeSqlString s <> "'"))
+  Aeson.String s -> Right (LitExpr s)
   Aeson.Number n -> Right (LitExpr (renderNumber n))
   Aeson.Bool b -> Right (LitExpr (if b then "TRUE" else "FALSE"))
   Aeson.Null -> Right (LitExpr "NULL")
