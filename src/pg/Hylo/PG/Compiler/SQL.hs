@@ -18,13 +18,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Backend.Capability (Postgres)
 import Hylo.Core.Expr (QExpr (..))
-import Hylo.Core.Query.AST
-  ( FromItem (..)
-  , LateralBinding (..)
-  , Projectable (..)
-  , renderExpr
-  , renderLockClause
-  )
 import Hylo.Core.Query.Monad
   ( Query (..)
   , QueryState (..)
@@ -33,6 +26,13 @@ import Hylo.Core.Query.Monad
 import Hylo.PG.Compiler.JoinFlattener
   ( flattenJoins
   , renderFromItem
+  )
+import Hylo.SQL.AST
+  ( FromItem (..)
+  , LateralBinding (..)
+  , Projectable (..)
+  , renderExpr
+  , renderLockClause
   )
 import Hylo.SQL.Query.CTE (renderCTEs)
 

@@ -51,14 +51,14 @@ module Hylo.PG.Mutation.Locking
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Hylo.Core.Query (Tx (..), TxMode (..))
-import Hylo.Core.Query.AST
+import Hylo.Core.Query.Monad (Query (..), QueryState (..))
+import Hylo.Core.TypeError (AssertWritable (..))
+import Hylo.SQL.AST
   ( LockClause (..)
   , LockStrength (..)
   , LockWait (..)
   , renderLockClause
   )
-import Hylo.Core.Query.Monad (Query (..), QueryState (..))
-import Hylo.Core.TypeError (AssertWritable (..))
 
 -- | Wait policy: skip rows locked by concurrent transactions immediately.
 skipLocked :: LockWait

@@ -22,13 +22,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Backend.Capability (SupportsLateralSubqueries (..))
 import Hylo.Core.Expr (QExpr (..))
-import Hylo.Core.Query.AST
-  ( FromItem (..)
-  , LateralBinding (..)
-  , Projectable (..)
-  , RelationBinding (..)
-  , renderExpr
-  )
 import Hylo.Core.Query.Monad
   ( Query (..)
   , QueryState (..)
@@ -37,6 +30,13 @@ import Hylo.Core.Query.Monad
 import Hylo.PG.Compiler.JoinFlattener
   ( flattenJoins
   , renderFromItem
+  )
+import Hylo.SQL.AST
+  ( FromItem (..)
+  , LateralBinding (..)
+  , Projectable (..)
+  , RelationBinding (..)
+  , renderExpr
   )
 
 -- | Relational container representing a 1-to-many correlated nested graph slice.

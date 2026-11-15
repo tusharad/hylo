@@ -31,10 +31,10 @@ import Hylo.Core.Context (Col, Ctx (..))
 import Hylo.Core.Expr (QExpr (..), colExpr)
 import Hylo.Core.Key (Id (..))
 import Hylo.Core.Query (Query (..))
-import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Table (Table (..), TableSchema (..), colSpecExpr, column, primaryKey, tableSchema)
 import Hylo.PG.Compiler.SQL (renderSQL)
 import Hylo.PG.Search.Hybrid
+import Hylo.SQL.AST (Projectable (..), renderExpr)
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck

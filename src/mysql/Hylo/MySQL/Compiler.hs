@@ -16,16 +16,16 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Backend.Capability (MySQL)
 import Hylo.Core.Expr (QExpr (..))
-import Hylo.Core.Query.AST
-  ( FromItem (..)
-  , LateralBinding (..)
-  , Projectable (..)
-  , renderExpr
-  )
 import Hylo.Core.Query.Monad
   ( Query (..)
   , QueryState (..)
   , initialQueryState
+  )
+import Hylo.SQL.AST
+  ( FromItem (..)
+  , LateralBinding (..)
+  , Projectable (..)
+  , renderExpr
   )
 import Hylo.SQL.Compiler.JoinFlattener
   ( flattenJoins

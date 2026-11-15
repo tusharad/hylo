@@ -33,8 +33,8 @@ module Hylo.Core.Query.Pagination
 import Control.DeepSeq (NFData (..))
 import Data.Text (Text)
 import Hylo.Core.Expr (QExpr (..), ToQExpr (..))
-import Hylo.Core.Query.AST (exprAliases, renderExpr)
 import Hylo.Core.Query.Monad (Query (..), where_)
+import Hylo.SQL.AST (exprAliases, renderExpr)
 
 -- | Direction for keyset seeking.
 data SeekDirection

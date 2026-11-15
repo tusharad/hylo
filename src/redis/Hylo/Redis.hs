@@ -23,12 +23,19 @@ module Hylo.Redis
   , redisHSetCol
   ) where
 
-import Data.ByteString (ByteString)
-import Data.Text (Text)
-import qualified Data.Text.Encoding as TE
 import GHC.Generics (Generic)
 import Hylo.Backend.Capability (Redis)
-import Hylo.Core (ColDef (..), TableSchema (..))
+import Hylo.Core
+  ( ColDef (..)
+  , TableSchema (..)
+  , colName
+  , tableName
+  )
+import Hylo.Core.Text
+  ( ByteString
+  , Text
+  , decodeUtf8Lenient
+  )
 
 -- | Abstract commands supported by the Hylo Redis engine.
 data RedisCmd
@@ -47,8 +54,6 @@ renderRedisCmd = \case
   RedisDel k -> "DEL " <> k
   RedisHGet k f -> "HGET " <> k <> " " <> f
   RedisHSet k f v -> "HSET " <> k <> " " <> f <> " " <> decodeUtf8Lenient v
-  where
-    decodeUtf8Lenient = TE.decodeUtf8With (\_ _ -> Just '?')
 
 -- | Formulate a canonical Redis key from a 'TableSchema' and record ID.
 redisTableKey :: TableSchema table -> Text -> Text

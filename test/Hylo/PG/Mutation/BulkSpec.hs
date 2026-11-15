@@ -44,7 +44,6 @@ import Hylo.Core.Query
   , insert
   , withUniqueKey
   )
-import Hylo.Core.Query.AST (renderExpr)
 import Hylo.Core.Table
   ( Table (..)
   , TableSchema (..)
@@ -79,6 +78,7 @@ import Hylo.PG.Mutation.Bulk
   , insertMany_
   , renderBulkInsertSQL
   )
+import Hylo.SQL.AST (renderExpr)
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck

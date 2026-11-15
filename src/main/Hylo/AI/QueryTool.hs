@@ -65,7 +65,6 @@ import Hylo.AI.Schema.JSON
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr (..), colExpr)
 import Hylo.Core.Query (select)
-import Hylo.Core.Query.AST (ScopeId (..), formatScope)
 import Hylo.Core.Query.Monad
   ( Query
   , each
@@ -75,6 +74,7 @@ import Hylo.Core.Query.Monad
   )
 import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.Core.Transaction (Tx, TxError (..), TxMode (..))
+import Hylo.SQL.AST (ScopeId (..), formatScope)
 import Language.Haskell.TH.Quote (QuasiQuoter)
 
 -- | QuasiQuoter for compile-time verified JSON values (re-exported from aeson-qq).

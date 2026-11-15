@@ -1,1 +1,2 @@
 packages: .
+constraints: hasql < 1.10

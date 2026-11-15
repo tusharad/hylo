@@ -33,7 +33,6 @@ import Data.Text (Text)
 import qualified Data.Vector as Vector
 import GHC.TypeNats (natVal)
 import Hylo.Core.Expr (QExpr (..), colExpr)
-import Hylo.Core.Query.AST (renderExpr)
 import Hylo.PG.Vector
   ( DistanceMetric (..)
   , Embedding (..)
@@ -50,6 +49,7 @@ import Hylo.PG.Vector
   , (<->)
   , (<=>)
   )
+import Hylo.SQL.AST (renderExpr)
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
