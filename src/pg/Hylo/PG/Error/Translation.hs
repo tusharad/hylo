@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 {- |
@@ -27,15 +28,25 @@ module Hylo.PG.Error.Translation
   , translateDbError
   , translateDbErrorWith
   , translateDbErrorEither
+  , changesetConstraintRules
+  , translateChangesetDbError
+  , ConstraintDeclaration (..)
 
     -- * Constraint Identifier Parser
   , extractColumnFromConstraint
   ) where
 
 import Control.DeepSeq (NFData (..))
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+import Hylo.Core.Changeset
+  ( ConstraintDeclaration (..)
+  , constraintField
+  , constraintMessage
+  , constraintName
+  )
 import Hylo.Core.Error (FieldError (..))
 import Hylo.Core.Table (TableSchema (..))
 
@@ -157,6 +168,13 @@ translateDbErrorWith rules schema err =
                   "foreign_key_violation"
                   ("Referenced " <> col <> " does not exist")
               )
+          "23001" ->
+            Just
+              ( FieldError
+                  col
+                  "restrict_violation"
+                  ("Operation restricted by reference to " <> col)
+              )
           "23514" ->
             Just
               ( FieldError
@@ -196,3 +214,62 @@ translateDbErrorEither schema err =
             (dbSqlState err)
             ("Database error with SQLSTATE " <> dbSqlState err)
         )
+
+-- | Convert Changeset constraint declarations into PostgreSQL constraint mapping rules.
+changesetConstraintRules :: TableSchema table -> [ConstraintDeclaration] -> [ConstraintRule]
+changesetConstraintRules schema decls =
+  let tName = tableName schema
+   in map (declarationToRule tName) decls
+  where
+    declarationToRule tName = \case
+      UniqueConstraint f mName msg ->
+        let cName = case mName of
+              Just n -> n
+              Nothing -> tName <> "_" <> f <> "_key"
+         in ConstraintRule cName f "unique_violation" msg
+      ForeignKeyConstraint f _refTbl mName msg ->
+        let cName = case mName of
+              Just n -> n
+              Nothing -> tName <> "_" <> f <> "_fkey"
+         in ConstraintRule cName f "foreign_key_violation" msg
+
+-- | Translate a database driver error using the Changeset's registered constraints.
+translateChangesetDbError ::
+  TableSchema table ->
+  [ConstraintDeclaration] ->
+  DbError ->
+  FieldError
+translateChangesetDbError schema constraints err =
+  let rules = changesetConstraintRules schema constraints
+   in case translateDbErrorWith rules schema err of
+        Just fe ->
+          if dbSqlState err == "23001"
+            then fe {errorCode = "restrict_violation"}
+            else fe
+        Nothing ->
+          let tName = tableName schema
+              col = case dbColumn err of
+                Just c | not (T.null c) -> c
+                _ -> extractColumnFromConstraint tName (dbConstraintName err)
+              matchingDecl =
+                [ (constraintField c, constraintMessage c)
+                | c <- constraints
+                , constraintField c == col || constraintName c == Just (dbConstraintName err)
+                ]
+              code = case dbSqlState err of
+                "23505" -> "unique_violation"
+                "23503" -> "foreign_key_violation"
+                "23001" -> "restrict_violation"
+                "23514" -> "check_violation"
+                "22001" -> "string_overflow"
+                "23502" -> "not_null_violation"
+                other -> other
+           in case matchingDecl of
+                ((f, msg) : _) -> FieldError f code msg
+                [] ->
+                  let defaultMsg = case code of
+                        "unique_violation" -> "A record with this " <> col <> " already exists"
+                        "foreign_key_violation" -> "Referenced " <> col <> " does not exist"
+                        "restrict_violation" -> "Operation restricted by reference to " <> col
+                        _ -> fromMaybe ("Database error with SQLSTATE " <> dbSqlState err) (dbMessage err)
+                   in FieldError col code defaultMsg

@@ -210,6 +210,7 @@ translateHasqlError = \case
        in case sqlState of
             "23505" -> TxConstraintViolation "23505" message detail
             "23503" -> TxConstraintViolation "23503" message detail
+            "23001" -> TxConstraintViolation "23001" message detail
             "23514" -> TxConstraintViolation "23514" message detail
             "40001" -> TxWriteConflict message
             "40P01" -> TxDeadlockDetected message

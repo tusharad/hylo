@@ -22,6 +22,7 @@ import qualified Hylo.PG.Compiler.JoinFlattenerSpec as JoinFlattenerSpec
 import qualified Hylo.PG.Compiler.LateralSpec as LateralSpec
 import qualified Hylo.PG.Compiler.WindowSpec as WindowSpec
 import qualified Hylo.PG.Mutation.BulkSpec as BulkSpec
+import qualified Hylo.PG.Mutation.ChangesetSpec as PGChangesetSpec
 import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
 import qualified Hylo.PG.RealPostgresSpec as RealPostgresSpec
 import qualified Hylo.PG.Search.HybridSpec as HybridSpec
@@ -47,6 +48,7 @@ main = hspec $ do
   CursorSpec.spec
   RetrySpec.spec
   BulkSpec.spec
+  PGChangesetSpec.spec
   VectorSpec.spec
   HybridSpec.spec
   QueryToolSpec.spec
