@@ -28,19 +28,19 @@ import Hylo.Core
   ( Col
   , Ctx (..)
   , Id
-  , Projectable (..)
   , Table (..)
   , TableSchema
   , colSpecExpr
   , column
   , foreignKey
   , primaryKey
-  , renderExpr
   , tableSchema
   , (==.)
   )
 import Hylo.Core.Query
-  ( each
+  ( Projectable (..)
+  , each
+  , renderExpr
   , where_
   )
 import Hylo.PG.Compiler.Lateral (many)

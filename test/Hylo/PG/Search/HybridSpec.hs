@@ -35,9 +35,9 @@ import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Table (Table (..), TableSchema (..), colSpecExpr, column, primaryKey, tableSchema)
 import Hylo.PG.Compiler.SQL (renderSQL)
 import Hylo.PG.Search.Hybrid
+import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
-import Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 
 default (Text, Int64, Double)
 

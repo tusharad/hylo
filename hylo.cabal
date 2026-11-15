@@ -1,8 +1,4 @@
-cabal-version: 1.18
-
--- This file has been generated from package.yaml by hpack version 0.39.6.
---
--- see: https://github.com/sol/hpack
+cabal-version: 3.4
 
 name:           hylo
 version:        0.1.0.0
@@ -25,13 +21,25 @@ source-repository head
   type: git
   location: https://github.com/tusharad/hylo
 
-library
+common common-options
+  default-language: Haskell2010
+  ghc-options:
+    -Wall
+    -Werror
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+
+library hylo-core
+  import: common-options
+  visibility: public
+  hs-source-dirs: src/core
   exposed-modules:
-      Hylo
-      Hylo.AI.Policy.RLS
-      Hylo.AI.QueryTool
-      Hylo.AI.Schema.JSON
-      Hylo.Backend.Capability
       Hylo.Core
       Hylo.Core.Codec
       Hylo.Core.Context
@@ -39,28 +47,51 @@ library
       Hylo.Core.Expr
       Hylo.Core.Key
       Hylo.Core.Nullable
-      Hylo.Core.Query
-      Hylo.Core.Query.Aggregate
-      Hylo.Core.Query.AST
-      Hylo.Core.Query.CTE
-      Hylo.Core.Query.Monad
-      Hylo.Core.Query.Pagination
-      Hylo.Core.Query.Recursive
-      Hylo.Core.Query.Window
       Hylo.Core.Schema
       Hylo.Core.Table
       Hylo.Core.Transaction
       Hylo.Core.TypeError
       Hylo.Core.TypeLevel.Nat
-      Hylo.Migrate.AST
-      Hylo.Migrate.Catalog
-      Hylo.Migrate.Catalog.PG
-      Hylo.Migrate.CodeGen
-      Hylo.Migrate.Diff
-      Hylo.Migrate.Linter
-      Hylo.Migrate.Runner.Shadow
-      Hylo.NoSQL.Dynamo
-      Hylo.NoSQL.Mongo
+  build-depends:
+      base >=4.7 && <5
+    , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
+    , text >=1.2 && <3
+    , time >=1.9 && <2
+    , uuid >=1.3 && <2
+    , vector >=0.12 && <0.14
+
+library hylo-sql
+  import: common-options
+  visibility: public
+  hs-source-dirs: src/sql
+  exposed-modules:
+      Hylo.Backend.Capability
+      Hylo.SQL
+      Hylo.SQL.AST
+      Hylo.SQL.Compiler.JoinFlattener
+      Hylo.Core.Query
+      Hylo.Core.Query.AST
+      Hylo.Core.Query.Aggregate
+      Hylo.Core.Query.CTE
+      Hylo.Core.Query.Monad
+      Hylo.Core.Query.Pagination
+      Hylo.Core.Query.Recursive
+      Hylo.Core.Query.Window
+  build-depends:
+      base >=4.7 && <5
+    , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
+    , deepseq >=1.4 && <2
+    , hylo:hylo-core
+    , text >=1.2 && <3
+    , vector >=0.12 && <0.14
+
+library hylo-pg
+  import: common-options
+  visibility: public
+  hs-source-dirs: src/pg
+  exposed-modules:
       Hylo.PG
       Hylo.PG.Codec.Binary
       Hylo.PG.Compiler.Aggregate
@@ -83,13 +114,79 @@ library
       Hylo.PG.Transaction.Retry
       Hylo.PG.Transaction.Savepoint
       Hylo.PG.Vector
+  build-depends:
+      base >=4.7 && <5
+    , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
+    , deepseq >=1.4 && <2
+    , hasql >=1.6 && <2
+    , hasql-pool >=1.0 && <2
+    , hasql-transaction >=1.1 && <2
+    , hylo:hylo-core
+    , hylo:hylo-sql
+    , stm >=2.5 && <3
+    , text >=1.2 && <3
+    , time >=1.9 && <2
+    , vector >=0.12 && <0.14
+
+library hylo-mysql
+  import: common-options
+  visibility: public
+  hs-source-dirs: src/mysql
+  exposed-modules:
+      Hylo.MySQL
+      Hylo.MySQL.Compiler
+  build-depends:
+      base >=4.7 && <5
+    , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
+    , hylo:hylo-core
+    , hylo:hylo-sql
+    , text >=1.2 && <3
+
+library hylo-sqlite
+  import: common-options
+  visibility: public
+  hs-source-dirs: src/sqlite
+  exposed-modules:
+      Hylo.SQLite
       Hylo.SQLite.Compiler
-      Lib
-  other-modules:
-      Paths_hylo
-  hs-source-dirs:
-      src
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      base >=4.7 && <5
+    , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
+    , hylo:hylo-core
+    , hylo:hylo-sql
+    , text >=1.2 && <3
+
+library hylo-redis
+  import: common-options
+  visibility: public
+  hs-source-dirs: src/redis
+  exposed-modules:
+      Hylo.Redis
+  build-depends:
+      base >=4.7 && <5
+    , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
+    , hylo:hylo-core
+    , text >=1.2 && <3
+
+library
+  import: common-options
+  hs-source-dirs: src/main
+  exposed-modules:
+      Hylo
+      Hylo.AI.Policy.RLS
+      Hylo.AI.QueryTool
+      Hylo.AI.Schema.JSON
+      Hylo.Migrate.AST
+      Hylo.Migrate.Catalog
+      Hylo.Migrate.Catalog.PG
+      Hylo.Migrate.CodeGen
+      Hylo.Migrate.Diff
+      Hylo.Migrate.Linter
+      Hylo.Migrate.Runner.Shadow
   build-depends:
       aeson >=2.0 && <3
     , aeson-qq >=0.8 && <1
@@ -100,43 +197,34 @@ library
     , hasql >=1.6 && <2
     , hasql-pool >=1.0 && <2
     , hasql-transaction >=1.1 && <2
+    , hylo:hylo-core
+    , hylo:hylo-mysql
+    , hylo:hylo-pg
+    , hylo:hylo-redis
+    , hylo:hylo-sql
+    , hylo:hylo-sqlite
     , scientific ==0.3.*
     , stm >=2.5 && <3
     , template-haskell >=2.16 && <3
     , text >=1.2 && <3
     , time >=1.9 && <2
     , vector >=0.12 && <0.14
-  default-language: Haskell2010
 
 executable hylo-exe
+  import: common-options
   main-is: Main.hs
-  other-modules:
-      Paths_hylo
-  hs-source-dirs:
-      app
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  hs-source-dirs: app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      aeson >=2.0 && <3
-    , aeson-qq >=0.8 && <1
-    , base >=4.7 && <5
-    , bytestring >=0.10 && <0.13
-    , containers >=0.6 && <0.8
-    , deepseq >=1.4 && <2
-    , hasql >=1.6 && <2
-    , hasql-pool >=1.0 && <2
-    , hasql-transaction >=1.1 && <2
+      base >=4.7 && <5
     , hylo
-    , scientific ==0.3.*
-    , stm >=2.5 && <3
-    , template-haskell >=2.16 && <3
-    , text >=1.2 && <3
-    , time >=1.9 && <2
-    , vector >=0.12 && <0.14
-  default-language: Haskell2010
+    , hylo:hylo-core
 
 test-suite hylo-test
+  import: common-options
   type: exitcode-stdio-1.0
   main-is: Spec.hs
+  hs-source-dirs: test
   other-modules:
       Hylo.AI.QueryToolSpec
       Hylo.Backend.CapabilitySpec
@@ -159,29 +247,8 @@ test-suite hylo-test
       Hylo.PG.Transaction.RetrySpec
       Hylo.PG.VectorSpec
       Hylo.Test.Docker
-      Test.Hylo.AI.QueryToolSpec
-      Test.Hylo.Backend.CapabilitySpec
-      Test.Hylo.Core.CodecSpec
-      Test.Hylo.Core.TransactionSpec
-      Test.Hylo.Core.TypeErrorSpec
-      Test.Hylo.Migrate.DiffSpec
-      Test.Hylo.Migrate.LinterSpec
-      Test.Hylo.PG.Compiler.AggregateSpec
-      Test.Hylo.PG.Compiler.CTESpec
-      Test.Hylo.PG.Compiler.JoinFlattenerSpec
-      Test.Hylo.PG.Compiler.LateralSpec
-      Test.Hylo.PG.Compiler.WindowSpec
-      Test.Hylo.PG.Mutation.BulkSpec
-      Test.Hylo.PG.Mutation.UpsertSpec
-      Test.Hylo.PG.Search.HybridSpec
-      Test.Hylo.PG.Streaming.CursorSpec
-      Test.Hylo.PG.Transaction.RetrySpec
-      Test.Hylo.PG.VectorSpec
-      Test.ShouldNotTypecheck
-      Paths_hylo
-  hs-source-dirs:
-      test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+      Hylo.Test.ShouldNotTypecheck
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       QuickCheck >=2.14
     , aeson >=2.0 && <3
@@ -195,6 +262,12 @@ test-suite hylo-test
     , hasql-transaction >=1.1 && <2
     , hspec >=2.11
     , hylo
+    , hylo:hylo-core
+    , hylo:hylo-mysql
+    , hylo:hylo-pg
+    , hylo:hylo-redis
+    , hylo:hylo-sql
+    , hylo:hylo-sqlite
     , process >=1.6 && <2
     , scientific ==0.3.*
     , should-not-typecheck >=2.1
@@ -203,4 +276,3 @@ test-suite hylo-test
     , text >=1.2 && <3
     , time >=1.9 && <2
     , vector >=0.12 && <0.14
-  default-language: Haskell2010

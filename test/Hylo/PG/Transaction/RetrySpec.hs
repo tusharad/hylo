@@ -35,15 +35,12 @@ import Data.Int (Int64)
 import Data.Text (Text)
 import Hylo.Core
 import Hylo.Core.Query
-  ( TxError (..)
-  , TxState (..)
-  , executeTx
-  , initialTxState
-  , runTxPure
+  ( Postgres
+  , Projectable (..)
+  , each
+  , insert
+  , renderExpr
   , select
-  , txFail
-  , withSavepoint
-  , withUniqueKey
   )
 import Hylo.PG.Connection (Pool (..), pool)
 import Hylo.PG.Pool.Routing
@@ -59,8 +56,6 @@ import Hylo.PG.Transaction.Retry
   , RetryPolicy (..)
   , defaultRetryPolicy
   , isRetryableError
-  , onCommit
-  , onRollback
   , renderBeginTransaction
   , renderIsolationLevel
   , runTxWithRetry

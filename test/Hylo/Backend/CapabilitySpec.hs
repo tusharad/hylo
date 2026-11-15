@@ -30,13 +30,10 @@ module Hylo.Backend.CapabilitySpec
   ) where
 
 import Control.DeepSeq (NFData (..))
-import Data.Aeson (Value (..))
-import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Int (Int64)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
 import Hylo.Backend.Capability
 import Hylo.Core
@@ -50,7 +47,6 @@ import Hylo.Core
   , foreignKey
   , lit
   , primaryKey
-  , renderExpr
   , tableSchema
   , (==.)
   , (>.)
@@ -66,14 +62,13 @@ import Hylo.Core.Query
   , limit
   , offset
   , orderBy
+  , renderExpr
   , sum_
   , where_
   )
-import Hylo.NoSQL.Dynamo
-import Hylo.NoSQL.Mongo
+import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
-import Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 
 default (Text, Int64, Double)
 
@@ -179,7 +174,7 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
       shouldNotTypecheckWith
         "[Hylo Error E008]"
         ( let invalidDynamoQuery =
-                withRecursive "nodes" undefined undefined undefined :: Query DynamoDB (NodeT 'Expr)
+                withRecursive "nodes" undefined undefined undefined :: Query DynamoDB (Col 'Expr Int64)
            in invalidDynamoQuery
         )
 
@@ -276,7 +271,7 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
       shouldNotTypecheckWith
         "[Hylo Error E008]"
         ( let invalidQuery =
-                withRecursive "nodes" undefined undefined undefined :: Query MongoDB (NodeT 'Expr)
+                withRecursive "nodes" undefined undefined undefined :: Query MongoDB (Col 'Expr Int64)
            in invalidQuery
         )
 
@@ -328,30 +323,3 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
       recursiveCTEDict (Proxy @SQLite) `shouldBe` ()
       transactionsDict (Proxy @SQLite) `shouldBe` ()
       batchLookupDict (Proxy @SQLite) `shouldBe` ()
-
-  describe "MongoDB Aggregation Pipeline Compiler" $ do
-    it "compiles filtering and projection queries into MongoDB pipeline stages" $ do
-      let q = do
-            u <- each userTable
-            where_ (u.active ==. lit True)
-            pure u.email
-          pipeline = renderMongoPipeline q
-      case pipeline of
-        Array stages -> do
-          stages `shouldSatisfy` (not . null)
-          case stages Vector.!? 0 of
-            Just (Object o) -> KeyMap.member "$match" o `shouldBe` True
-            _ -> expectationFailure "Expected $match stage at position 0"
-          case stages Vector.!? 1 of
-            Just (Object o) -> KeyMap.member "$project" o `shouldBe` True
-            _ -> expectationFailure "Expected $project stage at position 1"
-        _ -> expectationFailure "Expected JSON Array"
-
-    it "compiles limit and skip options into MongoDB pipeline stages" $ do
-      let q = do
-            u <- each userTable
-            limit 10
-            offset 20
-            pure u.email
-          stages = renderMongoStages q
-      stages `shouldContain` [SkipStage 20, LimitStage 10]

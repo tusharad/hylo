@@ -62,9 +62,9 @@ import Hylo.PG.Compiler.CTE
   , withRecursiveCycle
   )
 import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheck, shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
-import Test.ShouldNotTypecheck (shouldNotTypecheck, shouldNotTypecheckWith)
 
 -- | Employee domain table for hierarchical organization tree recursive tests.
 data EmployeeT (ctx :: Ctx) = Employee

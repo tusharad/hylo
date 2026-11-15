@@ -56,9 +56,9 @@ import Hylo.Core.Query.Aggregate
   , sum_
   )
 import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.Test.ShouldNotTypecheck
 import Test.Hspec
 import Test.QuickCheck
-import Test.ShouldNotTypecheck
 
 -- | Test Table: User entity with integer spend and active flag.
 data UserT (ctx :: Ctx) = User
