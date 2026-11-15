@@ -29,8 +29,13 @@ module Hylo.PG
   , module Hylo.PG.Search.Hybrid
   , module Hylo.PG.Search.RRF
   , module Hylo.PG.Features
+  , module Hylo.PG.JSONB
+  , module Hylo.PG.Range
+  , module Hylo.PG.Array
+  , module Hylo.PG.Search.FullText
   ) where
 
+import Hylo.PG.Array
 import Hylo.PG.Codec.Binary
 import Hylo.PG.Compiler.Aggregate
 import Hylo.PG.Compiler.CTE
@@ -42,11 +47,14 @@ import Hylo.PG.Connection
 import Hylo.PG.Error.Translation
 import Hylo.PG.Features
 import Hylo.PG.Hydration.Graph
+import Hylo.PG.JSONB
 import Hylo.PG.Mutation.Bulk
 import Hylo.PG.Mutation.Changeset
 import Hylo.PG.Mutation.Locking
 import Hylo.PG.Mutation.Upsert
 import Hylo.PG.Pool.Routing
+import Hylo.PG.Range
+import Hylo.PG.Search.FullText
 import Hylo.PG.Search.Hybrid
 import Hylo.PG.Search.RRF
 import Hylo.PG.Streaming.Cursor

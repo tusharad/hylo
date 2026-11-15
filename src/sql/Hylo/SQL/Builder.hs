@@ -289,6 +289,17 @@ buildExpr d = \case
           , sbsParams = sbsParams st |> param
           }
       pure (B.fromText ph)
+  LitTypedExpr val pType -> do
+    st <- get
+    let nextIdx = sbsParamCount st + 1
+        param = BoundParam nextIdx val pType
+        ph = bindPlaceholder d nextIdx
+    put
+      st
+        { sbsParamCount = nextIdx
+        , sbsParams = sbsParams st |> param
+        }
+    pure (B.fromText ph)
   ColExpr rel col -> do
     mappedRel <- resolveRelationAlias rel
     pure (B.fromText (quoteScopedCol d mappedRel col))
@@ -319,6 +330,10 @@ buildExpr d = \case
       Just cond -> do
         condB <- buildExpr d cond
         pure (base <> " FILTER (WHERE " <> condB <> ")")
+  Func2Expr fn arg1 arg2 -> do
+    b1 <- buildExpr d arg1
+    b2 <- buildExpr d arg2
+    pure (B.fromText fn <> "(" <> b1 <> ", " <> b2 <> ")")
   StringAggExpr arg delim mFilter -> do
     argB <- buildExpr d arg
     delimB <- buildExpr d delim

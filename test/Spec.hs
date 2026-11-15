@@ -16,15 +16,18 @@ import qualified Hylo.Core.TransactionSpec as TransactionSpec
 import qualified Hylo.Core.TypeErrorSpec as TypeErrorSpec
 import qualified Hylo.Migrate.DiffSpec as DiffSpec
 import qualified Hylo.Migrate.LinterSpec as LinterSpec
+import qualified Hylo.PG.AlgebraSpec as AlgebraSpec
 import qualified Hylo.PG.Compiler.AggregateSpec as AggregateSpec
 import qualified Hylo.PG.Compiler.CTESpec as CTESpec
 import qualified Hylo.PG.Compiler.JoinFlattenerSpec as JoinFlattenerSpec
 import qualified Hylo.PG.Compiler.LateralSpec as LateralSpec
 import qualified Hylo.PG.Compiler.WindowSpec as WindowSpec
 import qualified Hylo.PG.ConnectionSpec as ConnectionSpec
+import qualified Hylo.PG.JSONBSpec as JSONBSpec
 import qualified Hylo.PG.Mutation.BulkSpec as BulkSpec
 import qualified Hylo.PG.Mutation.ChangesetSpec as PGChangesetSpec
 import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
+import qualified Hylo.PG.RangeSpec as RangeSpec
 import qualified Hylo.PG.RealPostgresSpec as RealPostgresSpec
 import qualified Hylo.PG.Search.HybridSpec as HybridSpec
 import qualified Hylo.PG.Streaming.CursorSpec as CursorSpec
@@ -52,6 +55,9 @@ main = hspec $ do
   PGChangesetSpec.spec
   VectorSpec.spec
   HybridSpec.spec
+  JSONBSpec.spec
+  RangeSpec.spec
+  AlgebraSpec.spec
   QueryToolSpec.spec
   DiffSpec.spec
   LinterSpec.spec

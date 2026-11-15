@@ -37,6 +37,8 @@ module Hylo.PG.Connection
   , selectRowsWithSchema
   , selectRowsTx
   , selectRowsTxWith
+  , runExplain
+  , mkExplainStatement
   )
 where
 
@@ -90,7 +92,7 @@ import Hylo.Core.Transaction
   , initialTxState
   )
 import Hylo.PG.Codec.Binary (TableCodec (..))
-import Hylo.PG.Compiler.SQL (compilePostgresQuery)
+import Hylo.PG.Compiler.SQL (compilePostgresQuery, explainQuery)
 import Hylo.PG.Transaction.Hooks (executeCommitHooks, executeRollbackHooks)
 import Hylo.SQL.AST (Projectable (..))
 import Hylo.SQL.Builder (CompiledQuery (..), formatParamValue)
@@ -287,6 +289,8 @@ boundParamValueEncoder pType
   | pType == "jsonb" = contramap TE.encodeUtf8 Enc.jsonbBytes
   | pType == "json" = contramap TE.encodeUtf8 Enc.jsonBytes
   | pType == "vector" || "vector(" `T.isPrefixOf` pType = contramap TE.encodeUtf8 Enc.unknown
+  | "range" `T.isSuffixOf` pType = contramap TE.encodeUtf8 Enc.unknown
+  | pType == "tsvector" || pType == "tsquery" = contramap TE.encodeUtf8 Enc.unknown
   | pType == "unknown" = contramap TE.encodeUtf8 Enc.unknown
   | otherwise = Enc.text
   where
@@ -510,3 +514,36 @@ translateHasqlError = \case
             _ -> TxUserError (message <> if detail /= "" then " (" <> detail <> ")" else "")
     _ -> TxUserError (T.pack (show cmdErr))
   Sess.PipelineError pipErr -> TxUserError ("PipelineError: " <> T.pack (show pipErr))
+
+-- | Execute EXPLAIN (FORMAT JSON) or EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) on a PostgreSQL query.
+runExplain ::
+  Projectable a =>
+  Pool ->
+  Bool ->
+  Query (Postgres v) a ->
+  IO (Either TxError Text)
+runExplain (Pool _ _ (Just conn)) analyze q = do
+  let cq = explainQuery analyze q
+      stmt = mkExplainStatement (TE.encodeUtf8 cq.compiledSQL) (toList cq.compiledParams)
+  res <- Sess.run (Sess.statement (toList cq.compiledParams) stmt) conn
+  case res of
+    Left qErr -> pure (Left (translateHasqlError qErr))
+    Right jsonLines -> pure (Right (T.intercalate "\n" jsonLines))
+runExplain (Pool _ _ Nothing) analyze q = do
+  let cq = explainQuery analyze q
+  pure
+    ( Right
+        ( "[{\"Plan\": {\"Node Type\": \"Simulated Scan\", \"Query\": "
+            <> T.pack (show cq.compiledSQL)
+            <> "}}]"
+        )
+    )
+
+-- | Build a prepared Hasql statement executing EXPLAIN and returning the output rows as text.
+mkExplainStatement :: ByteString -> [BoundParam] -> Stmt.Statement [BoundParam] [Text]
+mkExplainStatement sqlBS ps =
+  Stmt.Statement
+    sqlBS
+    (buildParamsEncoder ps)
+    (Dec.rowList (Dec.column (Dec.nonNullable Dec.text)))
+    True

@@ -97,6 +97,7 @@ library hylo-pg
   hs-source-dirs: src/pg
   exposed-modules:
       Hylo.PG
+      Hylo.PG.Array
       Hylo.PG.Codec.Binary
       Hylo.PG.Compiler.Aggregate
       Hylo.PG.Compiler.CTE
@@ -108,11 +109,14 @@ library hylo-pg
       Hylo.PG.Error.Translation
       Hylo.PG.Features
       Hylo.PG.Hydration.Graph
+      Hylo.PG.JSONB
       Hylo.PG.Mutation.Bulk
       Hylo.PG.Mutation.Changeset
       Hylo.PG.Mutation.Locking
       Hylo.PG.Mutation.Upsert
       Hylo.PG.Pool.Routing
+      Hylo.PG.Range
+      Hylo.PG.Search.FullText
       Hylo.PG.Search.Hybrid
       Hylo.PG.Search.RRF
       Hylo.PG.Streaming.Cursor
@@ -241,15 +245,18 @@ test-suite hylo-test
       Hylo.Core.TypeErrorSpec
       Hylo.Migrate.DiffSpec
       Hylo.Migrate.LinterSpec
+      Hylo.PG.AlgebraSpec
       Hylo.PG.Compiler.AggregateSpec
       Hylo.PG.Compiler.CTESpec
       Hylo.PG.Compiler.JoinFlattenerSpec
       Hylo.PG.Compiler.LateralSpec
       Hylo.PG.Compiler.WindowSpec
       Hylo.PG.ConnectionSpec
+      Hylo.PG.JSONBSpec
       Hylo.PG.Mutation.BulkSpec
       Hylo.PG.Mutation.ChangesetSpec
       Hylo.PG.Mutation.UpsertSpec
+      Hylo.PG.RangeSpec
       Hylo.PG.RealPostgresSpec
       Hylo.PG.Search.HybridSpec
       Hylo.PG.Streaming.CursorSpec
