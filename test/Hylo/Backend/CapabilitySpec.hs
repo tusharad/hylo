@@ -34,6 +34,7 @@ import Data.Int (Int64)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.UUID (UUID)
 import GHC.Generics (Generic)
 import Hylo.Backend.Capability
 import Hylo.Core
@@ -70,6 +71,8 @@ import Hylo.Core.Query
   , where_
   , withRecursive
   )
+import Hylo.Core.Transaction (Tx (..), executeTx, initialTxState, txOperations)
+import Hylo.Core.TypeError (TxMode (..))
 import qualified Hylo.MySQL as MySQL
 import qualified Hylo.PG as PG
 import qualified Hylo.Redis as Redis
@@ -181,12 +184,12 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
           sqliteSQL = renderSQLiteSQL q
       pgSQL `shouldBe` sqliteSQL
 
-    it "statically rejects recursive CTEs on DynamoDB with [Hylo Error E008]" $ do
+    it "statically rejects recursive CTEs on Redis with [Hylo Error E008]" $ do
       shouldNotTypecheckWith
         "[Hylo Error E008]"
-        ( let invalidDynamoQuery =
-                withRecursive "nodes" undefined undefined undefined :: Query DynamoDB (Col 'Expr Int64)
-           in invalidDynamoQuery
+        ( let invalidRedisQuery =
+                withRecursive "nodes" undefined undefined undefined :: Query Redis (Col 'Expr Int64)
+           in invalidRedisQuery
         )
 
   describe "Formal Law 1: Cross-Backend Semantic Equivalence" $ do
@@ -246,13 +249,13 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
               | k <- keys
               , c <- [1 .. 3]
               ]
-            batch = viaBatchLoader @DynamoDB parents (.parentId) mockFetchChildren (.childParentId)
+            batch = viaBatchLoader @Postgres parents (.parentId) mockFetchChildren (.childParentId)
          in batch.batchQueryCount == 2 && batch.batchParentCount == length parents
 
     it "executes exactly 2 queries on empty parent input pool" $ do
       let parents = [] :: [ParentItem]
           mockFetchChildren (_ :: [Int64]) = []
-          batch = viaBatchLoader @DynamoDB parents (.parentId) mockFetchChildren (.childParentId)
+          batch = viaBatchLoader @Postgres parents (.parentId) mockFetchChildren (.childParentId)
       batch.batchQueryCount `shouldBe` 2
       batch.batchParentCount `shouldBe` 0
       batch.batchChildCount `shouldBe` 0
@@ -265,7 +268,7 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
             , ChildItem 201 2 "User 2-A"
             ]
           fetchChildren keys = filter (\c -> c.childParentId `elem` keys) allChildren
-          batch = viaBatchLoader @DynamoDB parents (.parentId) fetchChildren (.childParentId)
+          batch = viaBatchLoader @Postgres parents (.parentId) fetchChildren (.childParentId)
       length batch.batchResults `shouldBe` 3
       case lookup (ParentItem 1 "Org 1") [(p, cs) | (p, cs) <- batch.batchResults] of
         Just cs -> map (.childId) cs `shouldBe` [101, 102]
@@ -278,53 +281,91 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
         Nothing -> expectationFailure "Parent 3 missing"
 
   describe "Compile-Time Capability Rejection ([Hylo Error E008])" $ do
-    it "statically rejects recursive CTEs on MongoDB with [Hylo Error E008]" $ do
+    it "statically rejects recursive CTEs on Redis with [Hylo Error E008]" $ do
       shouldNotTypecheckWith
         "[Hylo Error E008]"
         ( let invalidQuery =
-                withRecursive "nodes" undefined undefined undefined :: Query MongoDB (Col 'Expr Int64)
+                withRecursive "nodes" undefined undefined undefined :: Query Redis (Col 'Expr Int64)
            in invalidQuery
         )
 
-    it "statically rejects window functions on DynamoDB with [Hylo Error E008]" $ do
+    it "statically rejects window functions on Redis with [Hylo Error E008]" $ do
       shouldNotTypecheckWith
         "[Hylo Error E008]"
-        (windowFunctionsDict (Proxy @DynamoDB))
+        (windowFunctionsDict (Proxy @Redis))
 
-    it "statically rejects window functions on MongoDB with [Hylo Error E008]" $ do
+    it "statically rejects relational joins on Redis with [Hylo Error E008]" $ do
       shouldNotTypecheckWith
         "[Hylo Error E008]"
-        (windowFunctionsDict (Proxy @MongoDB))
+        (relationalJoinsDict (Proxy @Redis))
 
-    it "statically rejects relational joins on DynamoDB with [Hylo Error E008]" $ do
+    it "statically rejects lateral subqueries on Redis with [Hylo Error E008]" $ do
       shouldNotTypecheckWith
         "[Hylo Error E008]"
-        (relationalJoinsDict (Proxy @DynamoDB))
+        (lateralSubqueriesDict (Proxy @Redis))
 
-    it "statically rejects relational joins on MongoDB with [Hylo Error E008]" $ do
+    it "statically rejects returning clause on Redis with [Hylo Error E008]" $ do
       shouldNotTypecheckWith
         "[Hylo Error E008]"
-        (relationalJoinsDict (Proxy @MongoDB))
-
-    it "statically rejects lateral subqueries on DynamoDB with [Hylo Error E008]" $ do
-      shouldNotTypecheckWith
-        "[Hylo Error E008]"
-        (lateralSubqueriesDict (Proxy @DynamoDB))
-
-    it "statically rejects lateral subqueries on MongoDB with [Hylo Error E008]" $ do
-      shouldNotTypecheckWith
-        "[Hylo Error E008]"
-        (lateralSubqueriesDict (Proxy @MongoDB))
+        (returningClauseDict (Proxy @Redis))
 
     it "statically rejects vector search on SQLite with [Hylo Error E008]" $ do
       shouldNotTypecheckWith
         "[Hylo Error E008]"
         (vectorSearchDict (Proxy @SQLite))
 
-    it "statically rejects vector search on DynamoDB with [Hylo Error E008]" $ do
+  describe "Compile-Time PostgreSQL Version Gating ([Hylo Error E016])" $ do
+    it "rejects PG18 feature on Postgres 'PG16 with [Hylo Error E016]" $ do
       shouldNotTypecheckWith
-        "[Hylo Error E008]"
-        (vectorSearchDict (Proxy @DynamoDB))
+        "[Hylo Error E016]"
+        ( let invalidTx = uuidv7Tx :: Tx (Postgres 'PG16) 'ReadWrite UUID
+           in invalidTx
+        )
+
+    it "statically rejects PG18 RETURNING WITH on Postgres 'PG16 with [Hylo Error E016]" $ do
+      shouldNotTypecheckWith
+        "[Hylo Error E016]"
+        ( let invalidTx = returningWithOldNew "accounts" :: Tx (Postgres 'PG16) 'ReadWrite ()
+           in invalidTx
+        )
+
+    it "statically rejects PG17 MERGE ... RETURNING on Postgres 'PG14 with [Hylo Error E016]" $ do
+      shouldNotTypecheckWith
+        "[Hylo Error E016]"
+        ( let invalidTx = mergeReturning "accounts" :: Tx (Postgres 'PG14) 'ReadWrite ()
+           in invalidTx
+        )
+
+    it "statically rejects PG15 MERGE INTO on Postgres 'PG14 with [Hylo Error E016]" $ do
+      shouldNotTypecheckWith
+        "[Hylo Error E016]"
+        ( let invalidTx = mergeInto "accounts" :: Tx (Postgres 'PG14) 'ReadWrite ()
+           in invalidTx
+        )
+
+    it "statically rejects PG15 UNIQUE NULLS NOT DISTINCT on Postgres 'PG14 with [Hylo Error E016]" $ do
+      shouldNotTypecheckWith
+        "[Hylo Error E016]"
+        (uniqueNullsNotDistinct @'PG14 "email")
+
+    it "permits PG18 features on Postgres 'PG18" $ do
+      let validTx = returningWithOldNew "accounts" :: Tx (Postgres 'PG18) 'ReadWrite ()
+          (res, st) = executeTx validTx initialTxState
+      res `shouldBe` Right ()
+      length (txOperations st) `shouldBe` 1
+
+    it "permits PG17 features on Postgres 'PG17" $ do
+      let validTx = mergeReturning "accounts" :: Tx (Postgres 'PG17) 'ReadWrite ()
+          (res, st) = executeTx validTx initialTxState
+      res `shouldBe` Right ()
+      length (txOperations st) `shouldBe` 1
+
+    it "permits PG15 features on Postgres 'PG15" $ do
+      let validTx = mergeInto "accounts" :: Tx (Postgres 'PG15) 'ReadWrite ()
+          (res, st) = executeTx validTx initialTxState
+      res `shouldBe` Right ()
+      length (txOperations st) `shouldBe` 1
+      uniqueNullsNotDistinct @'PG15 "email" `shouldBe` "UNIQUE NULLS NOT DISTINCT (email)"
 
   describe "SQLite Full Relational Capability Verification" $ do
     it "confirms SQLite provides relational joins, window functions, and recursive CTEs" $ do

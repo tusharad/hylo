@@ -16,7 +16,6 @@ module Hylo.PG.Compiler.CTE
   , SupportsRecursiveCTE (..)
   , SupportsRecursiveCTEs
   , recursiveCTEsDict
-  , DynamoDB
 
     -- * Capability-Guarded Combinators
   , with
@@ -29,8 +28,7 @@ module Hylo.PG.Compiler.CTE
   ) where
 
 import Hylo.Backend.Capability
-  ( DynamoDB
-  , SupportsCTE (..)
+  ( SupportsCTE (..)
   , SupportsRecursiveCTE (..)
   , SupportsRecursiveCTEs
   , recursiveCTEsDict

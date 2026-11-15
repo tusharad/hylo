@@ -27,6 +27,7 @@ module Hylo.PG.Compiler.CTESpec
 import Data.Int (Int32, Int64)
 import Data.List (nub, (\\))
 import Data.Text (Text)
+import Hylo.Backend.Capability (Redis)
 import Hylo.Core
   ( Col
   , Ctx (..)
@@ -54,7 +55,6 @@ import Hylo.Core.Query
 import Hylo.PG.Compiler.CTE
   ( CTETuple3 (..)
   , CycleClause (..)
-  , DynamoDB
   , Materialization (..)
   , with
   , withMaterialized
@@ -234,19 +234,19 @@ spec = describe "Epic 8: Common Table Expressions & Recursive Graphs" $ do
       sql `shouldContain` "WITH RECURSIVE \"graph\" AS ("
       sql `shouldContain` "CYCLE \"id\" SET \"is_cycle\" USING \"path\""
 
-    it "statically rejects recursive CTEs on DynamoDB with [Hylo Error E008]" $
+    it "statically rejects recursive CTEs on Redis with [Hylo Error E008]" $
       shouldNotTypecheckWith
         "[Hylo Error E008]"
-        ( let invalidDynamoQuery ::
+        ( let invalidRedisQuery ::
                 Query
-                  DynamoDB
+                  Redis
                   ( CTETuple3
                       (Hylo.Core.Col 'Expr (Id EmployeeT Int64))
                       (Hylo.Core.Col 'Expr Text)
                       (Hylo.Core.Col 'Expr Int32)
                   )
-              invalidDynamoQuery = withRecursive "nodes" undefined undefined undefined
-           in invalidDynamoQuery
+              invalidRedisQuery = withRecursive "nodes" undefined undefined undefined
+           in invalidRedisQuery
         )
 
     it "statically rejects mismatched base and recursive return types" $

@@ -25,9 +25,11 @@ import Data.List (isInfixOf)
 import Hylo.Core.Error (FieldError (..))
 import Hylo.Core.Key (Id (..))
 import Hylo.Core.Transaction (Tx (..), TxError (..), TxOp (..), TxState (..))
+import Hylo.Core.TypeError (PGVersion)
 import Test.Hspec (Expectation, expectationFailure)
 import qualified "should-not-typecheck" Test.ShouldNotTypecheck as SNT
 
+instance NFData PGVersion
 instance NFData FieldError
 
 instance NFData a => NFData (Id table a) where

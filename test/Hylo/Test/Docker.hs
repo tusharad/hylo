@@ -13,6 +13,7 @@ module Hylo.Test.Docker
   , getTestPostgresPool
   , ensureVectorExtension
   , detectPostgresUrl
+  , getTestPgVersion
   )
 where
 
@@ -34,6 +35,24 @@ import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.Process (readProcessWithExitCode)
 
+{- | Read the target PostgreSQL major version from HYLO_TEST_PG_VERSION (defaulting to "17").
+Supports 14, 15, 16, 17, 18.
+-}
+getTestPgVersion :: IO Text
+getTestPgVersion = do
+  mVer <- lookupEnv "HYLO_TEST_PG_VERSION"
+  pure $ case mVer of
+    Just "14" -> "14"
+    Just "15" -> "15"
+    Just "16" -> "16"
+    Just "17" -> "17"
+    Just "18" -> "18"
+    _ -> "17"
+
+-- | Docker image corresponding to the target PostgreSQL version.
+pgDockerImage :: Text -> String
+pgDockerImage ver = "pgvector/pgvector:pg" ++ T.unpack ver
+
 -- | Candidate connection strings to check in priority order.
 candidateUrls :: [Text]
 candidateUrls =
@@ -52,9 +71,10 @@ canConnect url = do
       pure True
     Left _ -> pure False
 
--- | Start a temporary Docker container running PostgreSQL 17 with pgvector.
+-- | Start a temporary Docker container running PostgreSQL (14–18) with pgvector.
 startDockerPostgres :: IO Bool
 startDockerPostgres = do
+  pgVer <- getTestPgVersion
   -- Check if docker is installed
   (exitCode, _, _) <- readProcessWithExitCode "which" ["docker"] ""
   case exitCode of
@@ -74,7 +94,7 @@ startDockerPostgres = do
           , "POSTGRES_PASSWORD=postgres"
           , "-e"
           , "POSTGRES_DB=hylo_test"
-          , "pgvector/pgvector:pg17"
+          , pgDockerImage pgVer
           ]
           ""
       -- Wait up to 10 seconds for container to become healthy

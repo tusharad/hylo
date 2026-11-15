@@ -51,10 +51,12 @@ import Hylo.Core.TypeError
   , AssertHasVersion (..)
   , AssertMatchingVectors (..)
   , AssertNoIO (..)
+  , AssertPGMinVersion (..)
   , AssertPaginationValid (..)
   , AssertParameterized (..)
   , AssertSafeMigration (..)
   , AssertValidForeignKey (..)
+  , PGVersion (..)
   )
 import Hylo.Test.ShouldNotTypecheck
 import Test.Hspec
@@ -184,7 +186,7 @@ spec = describe "Epic 3: Closed Type Family Diagnostics" $ do
     it "triggers [Hylo Error E008] on backend capability mismatch" $
       shouldNotTypecheckWith
         "[Hylo Error E008]"
-        (backendCapabilityDict (Proxy @"WindowFunctions") (Proxy @"MongoDB") (Proxy @'False))
+        (backendCapabilityDict (Proxy @"WindowFunctions") (Proxy @"Redis") (Proxy @'False))
 
     it "permits supported backend capability" $
       backendCapabilityDict (Proxy @"WindowFunctions") (Proxy @"Postgres") (Proxy @'True) `shouldBe` ()
@@ -235,3 +237,11 @@ spec = describe "Epic 3: Closed Type Family Diagnostics" $ do
 
     it "permits destructive migration when force allowed" $
       safeMigrationDict (Proxy @'True) (Proxy @'True) `shouldBe` ()
+
+    it "triggers [Hylo Error E016] on PostgreSQL version mismatch" $
+      shouldNotTypecheckWith
+        "[Hylo Error E016]"
+        (pgMinVersionDict (Proxy @'PG16) (Proxy @'PG18) (Proxy @"server-side uuidv7()"))
+
+    it "permits valid PostgreSQL version requirement" $
+      pgMinVersionDict (Proxy @'PG18) (Proxy @'PG18) (Proxy @"server-side uuidv7()") `shouldBe` ()
