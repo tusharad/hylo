@@ -19,7 +19,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query.AST (renderExpr)
-import Hylo.Core.Query.Aggregate (AggExpr (..))
+import Hylo.SQL.Query.Aggregate (AggExpr (..))
 
 -- | Render an aggregate expression to PostgreSQL SQL text.
 renderAggregateExpr :: AggExpr a -> Text

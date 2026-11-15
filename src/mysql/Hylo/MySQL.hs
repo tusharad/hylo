@@ -14,5 +14,5 @@ module Hylo.MySQL
   , renderMySQLSQLText
   ) where
 
-import Hylo.Core.Query.AST (MySQL)
+import Hylo.Backend.Capability (MySQL)
 import Hylo.MySQL.Compiler (renderMySQLSQL, renderMySQLSQLText)

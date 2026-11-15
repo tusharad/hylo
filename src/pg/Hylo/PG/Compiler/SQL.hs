@@ -16,16 +16,15 @@ module Hylo.PG.Compiler.SQL
 import Data.String (IsString (..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Hylo.Backend.Capability (Postgres)
 import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query.AST
   ( FromItem (..)
   , LateralBinding (..)
-  , Postgres
   , Projectable (..)
   , renderExpr
   , renderLockClause
   )
-import Hylo.Core.Query.CTE (renderCTEs)
 import Hylo.Core.Query.Monad
   ( Query (..)
   , QueryState (..)
@@ -35,17 +34,18 @@ import Hylo.PG.Compiler.JoinFlattener
   ( flattenJoins
   , renderFromItem
   )
+import Hylo.SQL.Query.CTE (renderCTEs)
 
 -- | Render a Query into strict Text SQL representation for PostgreSQL.
-renderPostgresSQL :: Projectable a => Query Postgres a -> Text
+renderPostgresSQL :: Projectable a => Query (Postgres v) a -> Text
 renderPostgresSQL = renderSQLText
 
 -- | Render a Query into polymorphic string/text SQL representation.
-renderSQL :: (Projectable a, IsString s) => Query Postgres a -> s
+renderSQL :: (Projectable a, IsString s) => Query (Postgres v) a -> s
 renderSQL q = fromString (T.unpack (renderSQLText q))
 
 -- | Render a Query into strict Text SQL representation.
-renderSQLText :: Projectable a => Query Postgres a -> Text
+renderSQLText :: Projectable a => Query (Postgres v) a -> Text
 renderSQLText q =
   let (res, st) = runQuery q initialQueryState
    in case qsUpsert st of

@@ -7,13 +7,13 @@
 {-# LANGUAGE TypeOperators #-}
 
 {- |
-Module      : Hylo.Core.Query.Window
+Module      : Hylo.SQL.Query.Window
 Description : First-class window specification, partitioning, framing algebra, and analytical functions
 Copyright   : (c) 2026 Tushar Adhatrao
 License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
 -}
-module Hylo.Core.Query.Window
+module Hylo.SQL.Query.Window
   ( -- * Window Specification & Combinators
     WindowDef (..)
   , window
@@ -72,8 +72,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..), ToQExpr (..))
 import Hylo.Core.Query.AST (Projectable (..), renderExpr)
-import Hylo.Core.Query.Aggregate (AggExpr (..))
 import Hylo.Core.Query.Monad (Query (..), QueryState (..))
+import Hylo.SQL.Query.Aggregate (AggExpr (..))
 
 -- | Order specification with direction and null placement semantics.
 newtype OrderSpec = OrderSpec

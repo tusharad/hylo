@@ -11,13 +11,13 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 {- |
-Module      : Hylo.Core.Query.CTE
+Module      : Hylo.SQL.Query.CTE
 Description : Common Table Expressions (CTEs), recursive graphs, and materialization fences
 Copyright   : (c) 2026 Tushar Adhatrao
 License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
 -}
-module Hylo.Core.Query.CTE
+module Hylo.SQL.Query.CTE
   ( -- * CTE References & Relational Binding
     CTERef (..)
   , mkCTERef

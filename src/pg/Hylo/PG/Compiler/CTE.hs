@@ -25,7 +25,7 @@ module Hylo.PG.Compiler.CTE
   , withRecursiveCycle
 
     -- * Re-exports from CTE Core
-  , module Hylo.Core.Query.CTE
+  , module Hylo.SQL.Query.CTE
   ) where
 
 import Hylo.Backend.Capability
@@ -39,7 +39,7 @@ import Hylo.Backend.Capability
   , withRecursive
   , withRecursiveCycle
   )
-import Hylo.Core.Query.CTE hiding
+import Hylo.SQL.Query.CTE hiding
   ( with
   , withMaterialized
   , withRecursive

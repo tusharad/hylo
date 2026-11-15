@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
@@ -34,7 +34,6 @@ import qualified Hasql.Connection as C
 import qualified Hasql.Connection.Setting as S
 import qualified Hasql.Connection.Setting.Connection as SC
 import qualified Hasql.Session as Sess
-import Hylo.Core.Query (Postgres)
 import Hylo.Core.Transaction
   ( Tx (..)
   , TxError (..)
@@ -110,7 +109,7 @@ are executed on real PostgreSQL. Otherwise, it safely falls back to pure state s
 runTx ::
   Pool ->
   TxMode ->
-  Tx Postgres mode a ->
+  Tx db mode a ->
   IO (Either TxError a)
 runTx (Pool _ _ (Just conn)) mode tx = do
   let (res, st) = executeTx tx initialTxState
@@ -212,7 +211,7 @@ translateHasqlError = \case
             "23505" -> TxConstraintViolation "23505" message detail
             "23503" -> TxConstraintViolation "23503" message detail
             "23514" -> TxConstraintViolation "23514" message detail
-            "40001" -> TxSerializationFailure message
+            "40001" -> TxWriteConflict message
             "40P01" -> TxDeadlockDetected message
             _ -> TxUserError (message <> if detail /= "" then " (" <> detail <> ")" else "")
     _ -> TxUserError (T.pack (show cmdErr))

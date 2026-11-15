@@ -2,9 +2,9 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
@@ -65,17 +65,17 @@ instance NFData (Cursor db a) where
   rnf (Cursor n b s) = rnf n `seq` rnf b `seq` rnf s
 
 -- | Render cursor declaration SQL command.
-renderDeclareCursor :: Cursor Postgres a -> Text
+renderDeclareCursor :: Cursor (Postgres v) a -> Text
 renderDeclareCursor c =
   "DECLARE \"" <> cursorName c <> "\" NO SCROLL CURSOR WITHOUT HOLD FOR " <> cursorQuerySql c
 
 -- | Render cursor batch fetch SQL command.
-renderFetchCursor :: Cursor Postgres a -> Int -> Text
+renderFetchCursor :: Cursor (Postgres v) a -> Int -> Text
 renderFetchCursor c batchSize =
   "FETCH FORWARD " <> T.pack (show batchSize) <> " FROM \"" <> cursorName c <> "\""
 
 -- | Render cursor close SQL command.
-renderCloseCursor :: Cursor Postgres a -> Text
+renderCloseCursor :: Cursor (Postgres v) a -> Text
 renderCloseCursor c =
   "CLOSE \"" <> cursorName c <> "\""
 
@@ -84,18 +84,18 @@ declareCursor ::
   Projectable a =>
   Text ->
   Int ->
-  Query Postgres a ->
-  Tx Postgres mode (Cursor Postgres a)
+  Query (Postgres v) a ->
+  Tx (Postgres v) mode (Cursor (Postgres v) a)
 declareCursor name batchSize q =
   let sql = renderSQL q
    in TxReturn (Cursor name (max 1 batchSize) sql)
 
 -- | Fetch a batch of records from an active cursor.
-fetchBatch :: Cursor Postgres a -> Int -> Tx Postgres mode [a]
+fetchBatch :: Cursor (Postgres v) a -> Int -> Tx (Postgres v) mode [a]
 fetchBatch _ _ = TxReturn []
 
 -- | Close an active server-side cursor.
-closeCursor :: Cursor Postgres a -> Tx Postgres mode ()
+closeCursor :: Cursor (Postgres v) a -> Tx (Postgres v) mode ()
 closeCursor _ = TxReturn ()
 
 -- | Functor pairing a yielded stream value with the rest of the stream.
@@ -185,8 +185,8 @@ fetching batches of @batchSize@ rows over the wire and yielding elements lazily.
 streamQuery ::
   Projectable a =>
   Int ->
-  Query Postgres a ->
-  Stream (Of a) (Tx Postgres mode) ()
+  Query (Postgres v) a ->
+  Stream (Of a) (Tx (Postgres v) mode) ()
 streamQuery batchSize q =
   let sql = renderSQL q
       _cur = Cursor "cur_0" (max 1 batchSize) sql

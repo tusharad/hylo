@@ -12,7 +12,7 @@ module Hylo.PG.Compiler.Window
 
 import Data.Text (Text)
 import Hylo.Backend.Capability (SupportsWindowFunctions (..))
-import Hylo.Core.Query.Window (WindowExpr (..))
+import Hylo.SQL.Query.Window (WindowExpr (..))
 
 -- | Compile a typed window expression into PostgreSQL SQL text.
 compileWindowExpr :: WindowExpr a -> Text

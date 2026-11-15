@@ -10,13 +10,13 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 {- |
-Module      : Hylo.Core.Query.Aggregate
+Module      : Hylo.SQL.Query.Aggregate
 Description : Type-safe aggregations, grouping invariants, and aggregate modifier combinators
 Copyright   : (c) 2026 Tushar Adhatrao
 License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
 -}
-module Hylo.Core.Query.Aggregate
+module Hylo.SQL.Query.Aggregate
   ( -- * Aggregation Context
     AggCtx (..)
   , AggExpr (..)

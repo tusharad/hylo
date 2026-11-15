@@ -1,7 +1,8 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
@@ -39,6 +40,7 @@ module Hylo.PG.Transaction.Retry
   , defaultPool
   , onCommit
   , onRollback
+  , pattern TxSerializationFailure
   , simulateSerializationFailureOnce
   , simulateSerializationFailures
   , simulateDeadlockOnce
@@ -49,7 +51,6 @@ import Control.Concurrent (threadDelay)
 import Control.DeepSeq (NFData (..))
 import Control.Monad (when)
 import Data.Text (Text)
-import Hylo.Core.Query (Postgres)
 import Hylo.Core.Transaction
   ( Tx (..)
   , TxError (..)
@@ -61,8 +62,8 @@ import Hylo.Core.Transaction
   , onRollback
   , simulateDeadlockOnce
   , simulateDeadlocks
-  , simulateSerializationFailureOnce
-  , simulateSerializationFailures
+  , simulateWriteConflictOnce
+  , simulateWriteConflicts
   )
 import Hylo.PG.Connection (Pool (..), defaultPool, pool)
 import Hylo.PG.Transaction.Hooks (executeCommitHooks, executeRollbackHooks)
@@ -73,6 +74,20 @@ data IsolationLevel
   | RepeatableRead
   | Serializable
   deriving (Eq, Show, Enum, Bounded)
+
+-- | Pattern synonym preserving backwards compatibility for PostgreSQL serialization failures.
+pattern TxSerializationFailure :: Text -> TxError
+pattern TxSerializationFailure msg = TxWriteConflict msg
+
+{-# COMPLETE TxUserError, TxConstraintViolation, TxDeadlockDetected, TxSerializationFailure #-}
+
+-- | Simulate a transient write conflict failure on the first attempt only.
+simulateSerializationFailureOnce :: forall k (db :: k) mode. Tx db mode ()
+simulateSerializationFailureOnce = simulateWriteConflictOnce
+
+-- | Simulate transient write conflict failures for the first @N@ attempts.
+simulateSerializationFailures :: forall k (db :: k) mode. Int -> Tx db mode ()
+simulateSerializationFailures = simulateWriteConflicts
 
 instance NFData IsolationLevel where
   rnf = \case
@@ -126,7 +141,7 @@ Only SQLSTATE 40001 (serialization failure) and 40P01 (deadlock detected) are re
 -}
 isRetryableError :: TxError -> Bool
 isRetryableError = \case
-  TxSerializationFailure _ -> True
+  TxWriteConflict _ -> True
   TxDeadlockDetected _ -> True
   TxUserError _ -> False
   TxConstraintViolation {} -> False
@@ -136,11 +151,11 @@ If the transaction succeeds, all accumulated 'onCommit' hooks run strictly once.
 If retries are exhausted or a non-retryable error occurs, accumulated 'onRollback' hooks run.
 -}
 runTxWithRetry ::
-  forall mode a.
+  forall k (db :: k) mode a.
   RetryPolicy ->
   Pool ->
   IsolationLevel ->
-  Tx Postgres mode a ->
+  Tx db mode a ->
   IO (Either TxError a)
 runTxWithRetry policy _targetPool _iso tx = loop 0
   where

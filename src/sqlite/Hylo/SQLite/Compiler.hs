@@ -14,15 +14,14 @@ module Hylo.SQLite.Compiler
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import Hylo.Backend.Capability (SQLite)
 import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query.AST
   ( FromItem (..)
   , LateralBinding (..)
   , Projectable (..)
-  , SQLite
   , renderExpr
   )
-import Hylo.Core.Query.CTE (renderCTEs)
 import Hylo.Core.Query.Monad
   ( Query (..)
   , QueryState (..)
@@ -32,6 +31,7 @@ import Hylo.SQL.Compiler.JoinFlattener
   ( flattenJoins
   , renderFromItem
   )
+import Hylo.SQL.Query.CTE (renderCTEs)
 
 -- | Render a Query into strict Text SQL representation for SQLite.
 renderSQLiteSQL :: Projectable a => Query SQLite a -> Text

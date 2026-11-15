@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoFieldSelectors #-}
@@ -184,8 +185,9 @@ spec = describe "Epic 11: Lexically Isolated Tx Monad & Savepoints" $ do
         `shouldBe` True
 
     it "returns Left on failed savepoint computation and records ROLLBACK" $ do
-      let tx = withSavepoint (txFail (TxUserError "intentional failure"))
-          (res, st) = executeTx (tx :: Tx Postgres 'ReadWrite (Either TxError ())) initialTxState
+      let tx :: Tx Postgres 'ReadWrite (Either TxError ())
+          tx = withSavepoint (txFail (TxUserError "intentional failure"))
+          (res, st) = executeTx tx initialTxState
       case res of
         Right (Left (TxUserError "intentional failure")) -> True `shouldBe` True
         _ -> expectationFailure ("Expected sub-transaction failure, got: " ++ show res)

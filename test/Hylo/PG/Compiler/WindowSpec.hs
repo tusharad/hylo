@@ -41,7 +41,8 @@ import Hylo.Core.Query
   , sum_
   , where_
   )
-import Hylo.Core.Query.Window
+import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.SQL.Query.Window
   ( asc
   , ascNullsFirst
   , cumeDist
@@ -70,7 +71,6 @@ import Hylo.Core.Query.Window
   , window
   , (&)
   )
-import Hylo.PG.Compiler.SQL (renderSQL)
 import Hylo.Test.ShouldNotTypecheck
 import Test.Hspec
 import Test.QuickCheck

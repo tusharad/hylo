@@ -23,11 +23,21 @@ module Hylo.Core.Table
   , Changeset (..)
   , emptyChangeset
   , withUniqueKey
+  , ColDef (..)
+  , ColSpec
+  , LogicalType (..)
   ) where
 
 import Data.Kind (Type)
 import Data.Text (Text)
-import Hylo.Core.Context (ColSpec (..), Ctx (..))
+import Hylo.Core.Context
+  ( ColDef (..)
+  , ColSpec
+  , Ctx (..)
+  , LogicalType (..)
+  , castLogicalType
+  , renderLogicalType
+  )
 import Hylo.Core.Expr (QExpr, colExpr)
 
 -- | Class for HKD table schemas that can project their fields into 'Expr context.
@@ -39,7 +49,7 @@ class Table (table :: Ctx -> Type) where
   tableColumnsMeta _ = []
 
 -- | Construct a typed SQL column expression for an alias and a column specification.
-colSpecExpr :: Text -> ColSpec a -> QExpr a
+colSpecExpr :: Text -> ColDef a -> QExpr a
 colSpecExpr alias spec = colExpr alias (colName spec)
 
 -- | Schema definition for an HKD table pairing the table name with its 'Meta record.
@@ -53,51 +63,55 @@ tableSchema :: Text -> table 'Meta -> TableSchema table
 tableSchema = TableSchema
 
 -- | Construct a standard non-nullable column descriptor.
-column :: Text -> Text -> ColSpec a
-column name sqlType =
-  ColSpec
+column :: Text -> LogicalType a -> ColDef a
+column name lt =
+  ColDef
     { colName = name
-    , colSqlType = sqlType
+    , colLogicalType = lt
     , colIsNullable = False
     , colIsPrimaryKey = False
     , colDescription = Nothing
+    , colSqlType = renderLogicalType lt
     }
 
 -- | Construct a nullable column descriptor.
-nullableColumn :: Text -> Text -> ColSpec (Maybe a)
-nullableColumn name sqlType =
-  ColSpec
+nullableColumn :: Text -> LogicalType a -> ColDef (Maybe a)
+nullableColumn name lt =
+  ColDef
     { colName = name
-    , colSqlType = sqlType
+    , colLogicalType = castLogicalType lt
     , colIsNullable = True
     , colIsPrimaryKey = False
     , colDescription = Nothing
+    , colSqlType = renderLogicalType lt
     }
 
 -- | Construct a primary key column descriptor.
-primaryKey :: Text -> Text -> ColSpec a
-primaryKey name sqlType =
-  ColSpec
+primaryKey :: Text -> LogicalType a -> ColDef a
+primaryKey name lt =
+  ColDef
     { colName = name
-    , colSqlType = sqlType
+    , colLogicalType = lt
     , colIsNullable = False
     , colIsPrimaryKey = True
     , colDescription = Nothing
+    , colSqlType = renderLogicalType lt
     }
 
 -- | Construct a foreign key column descriptor.
-foreignKey :: Text -> Text -> ColSpec a
-foreignKey name sqlType =
-  ColSpec
+foreignKey :: Text -> LogicalType a -> ColDef a
+foreignKey name lt =
+  ColDef
     { colName = name
-    , colSqlType = sqlType
+    , colLogicalType = lt
     , colIsNullable = False
     , colIsPrimaryKey = False
     , colDescription = Nothing
+    , colSqlType = renderLogicalType lt
     }
 
 -- | Attach an AI/documentation description to a column specification.
-describeCol :: Text -> ColSpec a -> ColSpec a
+describeCol :: Text -> ColDef a -> ColDef a
 describeCol desc colDef = colDef {colDescription = Just desc}
 
 -- | Changeset descriptor for table records.

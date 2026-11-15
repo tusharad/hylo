@@ -31,7 +31,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Context
   ( Col
-  , ColSpec (..)
+  , ColDef (..)
   , Ctx (..)
   , PatchField (..)
   )

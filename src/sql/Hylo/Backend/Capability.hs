@@ -24,15 +24,20 @@ batch lookup, and recursive CTEs) across PostgreSQL, SQLite, MongoDB, and Dynamo
 Unsupported feature usage fails statically at compile time with '[Hylo Error E008]'.
 -}
 module Hylo.Backend.Capability
-  ( -- * Database Backend Markers
-    Postgres
+  ( -- * Database Backend Markers & Engine Versions
+    PGVersion (..)
+  , Postgres
+  , MySQL
   , SQLite
+  , Redis
   , MongoDB
   , DynamoDB
 
     -- * Capability Typeclasses
   , SupportsRelationalJoins (..)
   , SupportsLateralSubqueries (..)
+  , SupportsReturningClause (..)
+  , SupportsKeyValueOps (..)
   , SupportsWindowFunctions (..)
   , SupportsTransactions (..)
   , SupportsVectorSearch (..)
@@ -72,21 +77,47 @@ import GHC.Generics (Generic)
 import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query.AST
   ( CycleClause (..)
-  , DynamoDB
   , FromItem (..)
   , LateralBinding (..)
   , Materialization (..)
-  , MongoDB
-  , Postgres
   , Projectable (..)
-  , SQLite
   , renderExpr
   )
-import Hylo.Core.Query.CTE (CTERef (..), CTERow (..), renderCTEs)
-import qualified Hylo.Core.Query.CTE as CTE
 import Hylo.Core.Query.Monad (Query (..), QueryState (..), initialQueryState)
 import Hylo.Core.TypeError (AssertBackendCapability (..), CheckBackendCapability)
 import Hylo.SQL.Compiler.JoinFlattener (flattenJoins, renderFromItem)
+import Hylo.SQL.Query.CTE (CTERef (..), CTERow (..), renderCTEs)
+import qualified Hylo.SQL.Query.CTE as CTE
+
+--------------------------------------------------------------------------------
+-- 0. Database Backend Markers & Engine Versions
+--------------------------------------------------------------------------------
+
+-- | PostgreSQL engine major versions.
+data PGVersion
+  = PG14
+  | PG15
+  | PG16
+  | PG17
+  deriving (Eq, Show, Enum, Bounded, Ord)
+
+-- | Target backend tag for PostgreSQL, optionally parameterized by engine version.
+data Postgres (v :: PGVersion)
+
+-- | Target backend tag for MySQL relational engine.
+data MySQL
+
+-- | Target backend tag for SQLite embedded relational engine.
+data SQLite
+
+-- | Target backend tag for Redis in-memory key-value engine.
+data Redis
+
+-- | Target backend tag for MongoDB document database engine.
+data MongoDB
+
+-- | Target backend tag for DynamoDB key-value/document database engine.
+data DynamoDB
 
 --------------------------------------------------------------------------------
 -- 1. Capability Typeclasses
@@ -99,6 +130,14 @@ class SupportsRelationalJoins db where
 -- | Capability typeclass certifying backend support for correlated LATERAL subqueries.
 class SupportsLateralSubqueries db where
   lateralSubqueriesDict :: Proxy db -> ()
+
+-- | Capability typeclass certifying backend support for RETURNING clauses on mutation statements.
+class SupportsReturningClause db where
+  returningClauseDict :: Proxy db -> ()
+
+-- | Capability typeclass certifying backend support for native Key-Value operations.
+class SupportsKeyValueOps db where
+  keyValueOpsDict :: Proxy db -> ()
 
 -- | Capability typeclass certifying backend support for ANSI window functions and framing.
 class SupportsWindowFunctions db where
@@ -135,11 +174,52 @@ recursiveCTEsDict = recursiveCTEDict
 -- 2. Capability Instances: PostgreSQL
 --------------------------------------------------------------------------------
 
+instance SupportsRelationalJoins (Postgres v) where
+  relationalJoinsDict _ = ()
+
+instance SupportsLateralSubqueries (Postgres v) where
+  lateralSubqueriesDict _ = ()
+
+instance SupportsReturningClause (Postgres v) where
+  returningClauseDict _ = ()
+
+instance
+  (AssertBackendCapability "Key-Value Operations" "PostgreSQL" 'False) =>
+  SupportsKeyValueOps (Postgres v)
+  where
+  keyValueOpsDict _ =
+    backendCapabilityDict (Proxy @"Key-Value Operations") (Proxy @"PostgreSQL") (Proxy @'False)
+
+instance SupportsWindowFunctions (Postgres v) where
+  windowFunctionsDict _ = ()
+
+instance SupportsTransactions (Postgres v) where
+  transactionsDict _ = ()
+
+instance SupportsVectorSearch (Postgres v) where
+  vectorSearchDict _ = ()
+
+instance SupportsBatchLookup (Postgres v) where
+  batchLookupDict _ = ()
+
+instance SupportsCTE (Postgres v) where
+  cteDict _ = ()
+
+instance SupportsRecursiveCTE (Postgres v) where
+  recursiveCTEDict _ = ()
+
 instance SupportsRelationalJoins Postgres where
   relationalJoinsDict _ = ()
 
 instance SupportsLateralSubqueries Postgres where
   lateralSubqueriesDict _ = ()
+
+instance SupportsReturningClause Postgres where
+  returningClauseDict _ = ()
+
+instance (AssertBackendCapability "Key-Value Operations" "PostgreSQL" 'False) => SupportsKeyValueOps Postgres where
+  keyValueOpsDict _ =
+    backendCapabilityDict (Proxy @"Key-Value Operations") (Proxy @"PostgreSQL") (Proxy @'False)
 
 instance SupportsWindowFunctions Postgres where
   windowFunctionsDict _ = ()
@@ -160,7 +240,40 @@ instance SupportsRecursiveCTE Postgres where
   recursiveCTEDict _ = ()
 
 --------------------------------------------------------------------------------
--- 3. Capability Instances: SQLite
+-- 3. Capability Instances: MySQL
+--------------------------------------------------------------------------------
+
+instance SupportsRelationalJoins MySQL where
+  relationalJoinsDict _ = ()
+
+instance SupportsLateralSubqueries MySQL where
+  lateralSubqueriesDict _ = ()
+
+instance (AssertBackendCapability "Returning Clause" "MySQL" 'False) => SupportsReturningClause MySQL where
+  returningClauseDict _ =
+    backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"MySQL") (Proxy @'False)
+
+instance (AssertBackendCapability "Key-Value Operations" "MySQL" 'False) => SupportsKeyValueOps MySQL where
+  keyValueOpsDict _ =
+    backendCapabilityDict (Proxy @"Key-Value Operations") (Proxy @"MySQL") (Proxy @'False)
+
+instance SupportsWindowFunctions MySQL where
+  windowFunctionsDict _ = ()
+
+instance SupportsTransactions MySQL where
+  transactionsDict _ = ()
+
+instance SupportsBatchLookup MySQL where
+  batchLookupDict _ = ()
+
+instance SupportsCTE MySQL where
+  cteDict _ = ()
+
+instance SupportsRecursiveCTE MySQL where
+  recursiveCTEDict _ = ()
+
+--------------------------------------------------------------------------------
+-- 4. Capability Instances: SQLite
 --------------------------------------------------------------------------------
 
 instance SupportsRelationalJoins SQLite where
@@ -168,6 +281,13 @@ instance SupportsRelationalJoins SQLite where
 
 instance SupportsLateralSubqueries SQLite where
   lateralSubqueriesDict _ = ()
+
+instance SupportsReturningClause SQLite where
+  returningClauseDict _ = ()
+
+instance (AssertBackendCapability "Key-Value Operations" "SQLite" 'False) => SupportsKeyValueOps SQLite where
+  keyValueOpsDict _ =
+    backendCapabilityDict (Proxy @"Key-Value Operations") (Proxy @"SQLite") (Proxy @'False)
 
 instance SupportsWindowFunctions SQLite where
   windowFunctionsDict _ = ()
@@ -189,7 +309,38 @@ instance SupportsRecursiveCTE SQLite where
   recursiveCTEDict _ = ()
 
 --------------------------------------------------------------------------------
--- 4. Capability Instances: MongoDB
+-- 5. Capability Instances: Redis
+--------------------------------------------------------------------------------
+
+instance SupportsKeyValueOps Redis where
+  keyValueOpsDict _ = ()
+
+instance (AssertBackendCapability "Relational Joins" "Redis" 'False) => SupportsRelationalJoins Redis where
+  relationalJoinsDict _ =
+    backendCapabilityDict (Proxy @"Relational Joins") (Proxy @"Redis") (Proxy @'False)
+
+instance (AssertBackendCapability "Lateral Subqueries" "Redis" 'False) => SupportsLateralSubqueries Redis where
+  lateralSubqueriesDict _ =
+    backendCapabilityDict (Proxy @"Lateral Subqueries") (Proxy @"Redis") (Proxy @'False)
+
+instance (AssertBackendCapability "Returning Clause" "Redis" 'False) => SupportsReturningClause Redis where
+  returningClauseDict _ =
+    backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"Redis") (Proxy @'False)
+
+instance (AssertBackendCapability "Window Functions" "Redis" 'False) => SupportsWindowFunctions Redis where
+  windowFunctionsDict _ =
+    backendCapabilityDict (Proxy @"Window Functions") (Proxy @"Redis") (Proxy @'False)
+
+instance (AssertBackendCapability "CTEs" "Redis" 'False) => SupportsCTE Redis where
+  cteDict _ =
+    backendCapabilityDict (Proxy @"CTEs") (Proxy @"Redis") (Proxy @'False)
+
+instance (AssertBackendCapability "Recursive CTEs" "Redis" 'False) => SupportsRecursiveCTE Redis where
+  recursiveCTEDict _ =
+    backendCapabilityDict (Proxy @"Recursive CTEs") (Proxy @"Redis") (Proxy @'False)
+
+--------------------------------------------------------------------------------
+-- 6. Capability Instances: MongoDB
 --------------------------------------------------------------------------------
 
 instance (AssertBackendCapability "Relational Joins" "MongoDB" 'False) => SupportsRelationalJoins MongoDB where
@@ -199,6 +350,10 @@ instance (AssertBackendCapability "Relational Joins" "MongoDB" 'False) => Suppor
 instance (AssertBackendCapability "Lateral Subqueries" "MongoDB" 'False) => SupportsLateralSubqueries MongoDB where
   lateralSubqueriesDict _ =
     backendCapabilityDict (Proxy @"Lateral Subqueries") (Proxy @"MongoDB") (Proxy @'False)
+
+instance (AssertBackendCapability "Returning Clause" "MongoDB" 'False) => SupportsReturningClause MongoDB where
+  returningClauseDict _ =
+    backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"MongoDB") (Proxy @'False)
 
 instance (AssertBackendCapability "Window Functions" "MongoDB" 'False) => SupportsWindowFunctions MongoDB where
   windowFunctionsDict _ =
@@ -222,7 +377,7 @@ instance (AssertBackendCapability "Recursive CTEs" "MongoDB" 'False) => Supports
     backendCapabilityDict (Proxy @"Recursive CTEs") (Proxy @"MongoDB") (Proxy @'False)
 
 --------------------------------------------------------------------------------
--- 5. Capability Instances: DynamoDB
+-- 7. Capability Instances: DynamoDB
 --------------------------------------------------------------------------------
 
 instance (AssertBackendCapability "Relational Joins" "DynamoDB" 'False) => SupportsRelationalJoins DynamoDB where
@@ -235,6 +390,10 @@ instance
   where
   lateralSubqueriesDict _ =
     backendCapabilityDict (Proxy @"Lateral Subqueries") (Proxy @"DynamoDB") (Proxy @'False)
+
+instance (AssertBackendCapability "Returning Clause" "DynamoDB" 'False) => SupportsReturningClause DynamoDB where
+  returningClauseDict _ =
+    backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"DynamoDB") (Proxy @'False)
 
 instance (AssertBackendCapability "Window Functions" "DynamoDB" 'False) => SupportsWindowFunctions DynamoDB where
   windowFunctionsDict _ =
@@ -329,7 +488,7 @@ renderStandardSQLText q =
                     <> offsetClause
 
 -- | Render a Query into strict Text SQL representation for PostgreSQL.
-renderPostgresSQL :: Projectable a => Query Postgres a -> Text
+renderPostgresSQL :: Projectable a => Query (Postgres v) a -> Text
 renderPostgresSQL = renderStandardSQLText
 
 -- | Render a Query into strict Text SQL representation for SQLite.

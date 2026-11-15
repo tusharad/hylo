@@ -42,7 +42,8 @@ import Hylo.Core.Query
   ( each
   , having
   )
-import Hylo.Core.Query.Aggregate
+import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.SQL.Query.Aggregate
   ( aggregate
   , arrayAgg
   , avgFiltered
@@ -55,7 +56,6 @@ import Hylo.Core.Query.Aggregate
   , stringAgg
   , sum_
   )
-import Hylo.PG.Compiler.SQL (renderSQL)
 import Hylo.Test.ShouldNotTypecheck
 import Test.Hspec
 import Test.QuickCheck

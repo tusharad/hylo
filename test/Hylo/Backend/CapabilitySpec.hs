@@ -41,7 +41,7 @@ import Hylo.Core
   , Ctx (..)
   , Id (..)
   , Table (..)
-  , TableSchema
+  , TableSchema (..)
   , colSpecExpr
   , column
   , foreignKey
@@ -51,8 +51,13 @@ import Hylo.Core
   , (==.)
   , (>.)
   )
+import qualified Hylo.MySQL as MySQL
+import qualified Hylo.PG as PG
+import qualified Hylo.Redis as Redis
+import qualified Hylo.SQLite as SQLite
 import Hylo.Core.Query
   ( AggExpr
+  , Projectable (..)
   , Query
   , aggregate
   , asc
@@ -66,6 +71,10 @@ import Hylo.Core.Query
   , sum_
   , where_
   )
+import qualified Hylo.MySQL as MySQL
+import qualified Hylo.PG as PG
+import qualified Hylo.Redis as Redis
+import qualified Hylo.SQLite as SQLite
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
@@ -107,6 +116,9 @@ instance Table UserT where
     , renderExpr expr.active
     , renderExpr expr.totalSpend
     ]
+
+instance Projectable (UserT 'Expr) where
+  projectColumns = tableExprColumns
 
 instance Table OrgT where
   toTableExpr alias meta =
@@ -323,3 +335,27 @@ spec = describe "Epic 20: Polyglot Multi-Backend Capability Matrix & NoSQL Adapt
       recursiveCTEDict (Proxy @SQLite) `shouldBe` ()
       transactionsDict (Proxy @SQLite) `shouldBe` ()
       batchLookupDict (Proxy @SQLite) `shouldBe` ()
+
+  describe "Cross-Backend TableSchema Reference" $ do
+    it
+      "references a single TableSchema in Hylo.Core across hylo-pg, hylo-mysql, hylo-sqlite, and hylo-redis without type-conversion boilerplate"
+      $ do
+        let pgSql :: Text = PG.renderSQL (each userTable)
+        let mySql = MySQL.renderMySQLSQL (each userTable)
+        let sqliteSql = SQLite.renderSQLiteSQL (each userTable)
+        let redisCmd = Redis.renderRedisCmd (Redis.redisHGetCol userTable "42" (tableMeta userTable).email)
+        T.unpack pgSql `shouldContain` "FROM \"users\""
+        T.unpack mySql `shouldContain` "FROM \"users\""
+        T.unpack sqliteSql `shouldContain` "FROM \"users\""
+        redisCmd `shouldBe` "HGET users:42 email"
+
+  describe "Cross-Backend TableSchema Reference" $ do
+    it "references a single TableSchema in Hylo.Core across hylo-pg, hylo-mysql, hylo-sqlite, and hylo-redis without type-conversion boilerplate" $ do
+      let pgSql :: Text = PG.renderSQL (each userTable)
+      let mySql = MySQL.renderMySQLSQL (each userTable)
+      let sqliteSql = SQLite.renderSQLiteSQL (each userTable)
+      let redisCmd = Redis.renderRedisCmd (Redis.redisHGetCol userTable "42" (tableMeta userTable).email)
+      T.unpack pgSql `shouldContain` "FROM \"users\""
+      T.unpack mySql `shouldContain` "FROM \"users\""
+      T.unpack sqliteSql `shouldContain` "FROM \"users\""
+      redisCmd `shouldBe` "HGET users:42 email"
