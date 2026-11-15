@@ -8,6 +8,7 @@ Maintainer  : tusharadhatrao@gmail.com
 module Main (main) where
 
 import qualified Hylo.AI.QueryToolSpec as QueryToolSpec
+import qualified Hylo.Backend.CapabilitySpec as CapabilitySpec
 import qualified Hylo.Core.CodecSpec as CodecSpec
 import qualified Hylo.Core.TableSpec as TableSpec
 import qualified Hylo.Core.TransactionSpec as TransactionSpec
@@ -47,3 +48,4 @@ main = hspec $ do
   QueryToolSpec.spec
   DiffSpec.spec
   LinterSpec.spec
+  CapabilitySpec.spec

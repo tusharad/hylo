@@ -40,6 +40,10 @@ module Hylo.Core.Query.CTE
   , withMaterialized
   , withRecursive
   , withRecursiveCycle
+
+    -- * SQL Rendering of CTE clauses
+  , renderCTEs
+  , renderCTEBinding
   ) where
 
 import Control.DeepSeq (NFData (..))
@@ -432,3 +436,38 @@ withRecursiveCycle name mCycle baseCase recCase mainQuery = Query $ \s ->
           }
       (finalRes, finalSt) = runQuery (mainQuery cteRef) mainStInit
    in (finalRes, finalSt)
+
+-- | Render a list of CTE bindings into SQL WITH / WITH RECURSIVE prefix clauses.
+renderCTEs :: [CTEBinding] -> Text
+renderCTEs = \case
+  [] -> ""
+  ctes ->
+    let isRecursive = any isRec ctes
+        prefix = if isRecursive then "WITH RECURSIVE " else "WITH "
+        renderedBindings = T.intercalate ",\n" (map renderCTEBinding ctes)
+     in prefix <> renderedBindings <> " "
+  where
+    isRec (CTEBinding _ (RecursiveCTE {})) = True
+    isRec _ = False
+
+-- | Render an individual CTE definition.
+renderCTEBinding :: CTEBinding -> Text
+renderCTEBinding (CTEBinding _ (NonRecursiveCTE mat name sql)) =
+  let matStr = case mat of
+        DefaultMaterialization -> ""
+        Materialized -> "MATERIALIZED "
+        NotMaterialized -> "NOT MATERIALIZED "
+   in "\"" <> name <> "\" AS " <> matStr <> "(\n  " <> sql <> "\n)"
+renderCTEBinding (CTEBinding _ (RecursiveCTE name baseSql recSql mCycle)) =
+  let cycleStr = case mCycle of
+        Nothing -> ""
+        Just (CycleClause c s u) ->
+          " CYCLE \"" <> c <> "\" SET \"" <> s <> "\" USING \"" <> u <> "\""
+   in "\""
+        <> name
+        <> "\" AS (\n  "
+        <> baseSql
+        <> "\n  UNION ALL\n  "
+        <> recSql
+        <> "\n)"
+        <> cycleStr

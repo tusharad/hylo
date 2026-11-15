@@ -62,7 +62,7 @@ import GHC.TypeNats (natVal)
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query (Postgres, Query (..), QueryState (..))
-import Hylo.Core.Query.AST (Projectable (..), renderExpr)
+import Hylo.Core.Query.AST (Projectable (..), SQLite, renderExpr)
 import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.Core.TypeError (AssertBackendCapability (..))
 import Hylo.PG.Search.RRF
@@ -74,9 +74,6 @@ class SupportsHybridSearch db where
 
 instance SupportsHybridSearch Postgres where
   hybridSearchDict _ = ()
-
--- | Phantom type for SQLite used in static capability rejection tests.
-data SQLite
 
 instance (AssertBackendCapability "HybridSearchRRF" "SQLite" 'False) => SupportsHybridSearch SQLite where
   hybridSearchDict _ =

@@ -15,8 +15,8 @@ Transactional mutation operations (insert, update, delete) statically guarded
 against execution in 'ReadOnly' mode via closed TypeError assertion families.
 -}
 module Hylo.Core.Query
-  ( -- * Backend Markers
-    Postgres
+  ( -- * Backend Markers & Polyglot Capabilities
+    module Hylo.Backend.Capability
 
     -- * Operational Query Monad & AST
   , Query (..)
@@ -50,7 +50,6 @@ module Hylo.Core.Query
   , module Hylo.Core.Query.Window
 
     -- * Common Table Expressions & Recursive Graphs
-  , module Hylo.Core.Query.CTE
   , module Hylo.Core.Query.Recursive
 
     -- * Keyset Pagination
@@ -68,12 +67,14 @@ module Hylo.Core.Query
   , insert
   , update
   , delete
-  ) where
+  )
+where
 
 import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
+import Hylo.Backend.Capability
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr
 import Hylo.Core.Key (Id)
@@ -91,7 +92,6 @@ import Hylo.Core.Query.AST
   , renderLockClause
   )
 import Hylo.Core.Query.Aggregate
-import Hylo.Core.Query.CTE
 import Hylo.Core.Query.Monad
   ( FromRelation (..)
   , Query (..)
@@ -110,9 +110,6 @@ import Hylo.Core.Table (TableSchema (..))
 import Hylo.Core.Transaction
 import Hylo.Core.TypeError (AssertWritable (..))
 import Hylo.PG.Compiler.JoinFlattener (generateScopes)
-
--- | Phantom type identifying the PostgreSQL database engine.
-data Postgres
 
 -- | Changeset descriptor for table records.
 data Changeset (table :: Ctx -> Type) = Changeset

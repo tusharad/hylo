@@ -20,8 +20,8 @@ import Control.DeepSeq (NFData (..))
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Hylo.Backend.Capability (SupportsLateralSubqueries (..))
 import Hylo.Core.Expr (QExpr (..))
-import Hylo.Core.Query (Postgres)
 import Hylo.Core.Query.AST
   ( FromItem (..)
   , LateralBinding (..)
@@ -38,13 +38,6 @@ import Hylo.PG.Compiler.JoinFlattener
   ( flattenJoins
   , renderFromItem
   )
-
--- | Capability typeclass certifying that the target SQL backend supports ANSI LEFT JOIN LATERAL.
-class SupportsLateralSubqueries db where
-  lateralSubqueriesDict :: Proxy db -> ()
-
-instance SupportsLateralSubqueries Postgres where
-  lateralSubqueriesDict _ = ()
 
 -- | Relational container representing a 1-to-many correlated nested graph slice.
 data NestedList a = NestedList
