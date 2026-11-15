@@ -13,4 +13,9 @@ module Hylo.Core.Query.Recursive
     module Hylo.Core.Query.CTE
   ) where
 
-import Hylo.Core.Query.CTE
+import Hylo.Core.Query.CTE hiding
+  ( with
+  , withMaterialized
+  , withRecursive
+  , withRecursiveCycle
+  )

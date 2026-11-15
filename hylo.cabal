@@ -31,6 +31,7 @@ library
       Hylo.AI.Policy.RLS
       Hylo.AI.QueryTool
       Hylo.AI.Schema.JSON
+      Hylo.Backend.Capability
       Hylo.Core
       Hylo.Core.Codec
       Hylo.Core.Context
@@ -58,6 +59,8 @@ library
       Hylo.Migrate.Diff
       Hylo.Migrate.Linter
       Hylo.Migrate.Runner.Shadow
+      Hylo.NoSQL.Dynamo
+      Hylo.NoSQL.Mongo
       Hylo.PG
       Hylo.PG.Codec.Binary
       Hylo.PG.Compiler.Aggregate
@@ -80,6 +83,7 @@ library
       Hylo.PG.Transaction.Retry
       Hylo.PG.Transaction.Savepoint
       Hylo.PG.Vector
+      Hylo.SQLite.Compiler
       Lib
   other-modules:
       Paths_hylo
@@ -129,6 +133,7 @@ test-suite hylo-test
   main-is: Spec.hs
   other-modules:
       Hylo.AI.QueryToolSpec
+      Hylo.Backend.CapabilitySpec
       Hylo.Core.CodecSpec
       Hylo.Core.TableSpec
       Hylo.Core.TransactionSpec
@@ -147,6 +152,7 @@ test-suite hylo-test
       Hylo.PG.Transaction.RetrySpec
       Hylo.PG.VectorSpec
       Test.Hylo.AI.QueryToolSpec
+      Test.Hylo.Backend.CapabilitySpec
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TransactionSpec
       Test.Hylo.Core.TypeErrorSpec

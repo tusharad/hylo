@@ -11,7 +11,14 @@ License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
 -}
 module Hylo.Core.Query.AST
-  ( ScopeId (..)
+  ( -- * Database Backend Markers
+    Postgres
+  , SQLite
+  , MongoDB
+  , DynamoDB
+
+    -- * Query AST & Scopes
+  , ScopeId (..)
   , formatScope
   , RelationBinding (..)
   , LateralBinding (..)
@@ -33,6 +40,18 @@ import Control.DeepSeq (NFData (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..))
+
+-- | Phantom type identifying the PostgreSQL database engine.
+data Postgres
+
+-- | Phantom type identifying the SQLite database engine.
+data SQLite
+
+-- | Phantom type identifying the MongoDB database engine.
+data MongoDB
+
+-- | Phantom type identifying the DynamoDB database engine.
+data DynamoDB
 
 -- | Deterministic, collision-free relation scope identifier.
 newtype ScopeId = ScopeId
