@@ -23,10 +23,24 @@ module Hylo.Core.CodecSpec
   ( spec
   ) where
 
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString as BS
 import Data.Int (Int64)
+import Data.Ratio ((%))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time
+  ( Day
+  , NominalDiffTime
+  , UTCTime (..)
+  , addUTCTime
+  , fromGregorian
+  )
+import Data.UUID (UUID)
+import qualified Data.UUID as UUID
+import qualified Data.Vector as Vector
 import Hylo.Core
   ( Col
   , Ctx (..)
@@ -43,6 +57,7 @@ import Hylo.Core
   )
 import Hylo.Core.Codec
 import Hylo.PG.Codec.Binary
+import Hylo.PG.Vector (Embedding (..))
 import Test.Hspec
 import Test.QuickCheck
 
@@ -193,3 +208,108 @@ spec = describe "Epic 2: Zero-Generics Linear-Time Codec Engine" $ do
       catalog.catalogTableName `shouldBe` "users"
       catalog.catalogPrimaryKey `shouldBe` ["id"]
       length catalog.catalogColumns `shouldBe` 4
+
+  describe "User Story 12: PostgreSQL Binary Wire Codecs" $ do
+    it "Law 1: Binary Codec Round-Trip Invariant on UUID (OID 2950)" $
+      forAll genUUID $ \u ->
+        runBinaryDecoder uuidCodec (runBinaryEncoder uuidCodec u) == Right u
+
+    it "Law 1: Binary Codec Round-Trip Invariant on UTCTime pre-2000 (OID 1184)" $
+      forAll genPre2000UTCTime $ \t ->
+        runBinaryDecoder utcTimeCodec (runBinaryEncoder utcTimeCodec t) == Right t
+
+    it "Law 1: Binary Codec Round-Trip Invariant on UTCTime post-2000 (OID 1184)" $
+      forAll genPost2000UTCTime $ \t ->
+        runBinaryDecoder utcTimeCodec (runBinaryEncoder utcTimeCodec t) == Right t
+
+    it "Law 1: Binary Codec Round-Trip Invariant on Day (OID 1082)" $
+      forAll genDay $ \d ->
+        runBinaryDecoder dayCodec (runBinaryEncoder dayCodec d) == Right d
+
+    it "Law 1: Binary Codec Round-Trip Invariant on Aeson.Value jsonb (OID 3802)" $
+      forAll genJsonValue $ \j ->
+        runBinaryDecoder jsonbCodec (runBinaryEncoder jsonbCodec j) == Right j
+
+    it "Law 1: Binary Codec Round-Trip Invariant on Aeson.Value json (OID 114)" $
+      forAll genJsonValue $ \j ->
+        runBinaryDecoder jsonCodec (runBinaryEncoder jsonCodec j) == Right j
+
+    it "Law 1: Binary Codec Round-Trip Invariant on Embedding \"text-embedding-3-small\" 1536" $
+      forAll genEmbedding1536 $ \emb ->
+        runBinaryDecoder embeddingCodec (runBinaryEncoder embeddingCodec emb) == Right emb
+
+    it "Law 1: Binary Codec Round-Trip Invariant on 1-D binary arrays [Int64]" $
+      property $ \(xs :: [Int64]) ->
+        runBinaryDecoder (arrayCodec int64Codec) (runBinaryEncoder (arrayCodec int64Codec) xs) == Right xs
+
+    it "Law 1: Binary Codec Round-Trip Invariant on 1-D binary arrays [Text]" $
+      property $ \(strs :: [String]) ->
+        let xs = map T.pack strs
+         in runBinaryDecoder (arrayCodec textCodec) (runBinaryEncoder (arrayCodec textCodec) xs) == Right xs
+
+    it "decodes empty binary array [] correctly" $
+      let enc = runBinaryEncoder (arrayCodec int64Codec) []
+          dec = runBinaryDecoder (arrayCodec int64Codec) enc
+       in dec `shouldBe` Right []
+
+-- -----------------------------------------------------------------------------
+-- User Story 12 QuickCheck Generators
+-- -----------------------------------------------------------------------------
+
+-- | QuickCheck generator for UUIDs.
+genUUID :: Gen UUID
+genUUID = UUID.fromWords <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary
+
+-- | QuickCheck generator for Days.
+genDay :: Gen Day
+genDay = do
+  y <- choose (1970, 2050)
+  m <- choose (1, 12)
+  d <- choose (1, 28)
+  pure (fromGregorian y m d)
+
+-- | QuickCheck generator for pre-2000 UTCTime timestamps (negative microseconds).
+genPre2000UTCTime :: Gen UTCTime
+genPre2000UTCTime = do
+  micros <- choose (-946728000000000, -1)
+  let diff = fromRational (micros % 1000000) :: NominalDiffTime
+  pure (addUTCTime diff (UTCTime (fromGregorian 2000 1 1) 0))
+
+-- | QuickCheck generator for post-2000 UTCTime timestamps (positive microseconds).
+genPost2000UTCTime :: Gen UTCTime
+genPost2000UTCTime = do
+  micros <- choose (0, 1104633600000000)
+  let diff = fromRational (micros % 1000000) :: NominalDiffTime
+  pure (addUTCTime diff (UTCTime (fromGregorian 2000 1 1) 0))
+
+-- | QuickCheck generator for recursive Aeson.Value.
+genJsonValue :: Gen Aeson.Value
+genJsonValue = sized $ \n ->
+  if n <= 1
+    then
+      oneof
+        [ pure Aeson.Null
+        , Aeson.Bool <$> arbitrary
+        , Aeson.Number . fromInteger <$> choose (-100000, 100000)
+        , Aeson.String . T.pack <$> listOf (elements ['a' .. 'z'])
+        ]
+    else
+      oneof
+        [ pure Aeson.Null
+        , Aeson.Bool <$> arbitrary
+        , Aeson.Number . fromInteger <$> choose (-100000, 100000)
+        , Aeson.String . T.pack <$> listOf (elements ['a' .. 'z'])
+        , Aeson.Array . Vector.fromList <$> resize (min n 5) (listOf genJsonValue)
+        , do
+            kvs <- resize (min n 5) $ listOf $ do
+              k <- listOf1 (elements ['a' .. 'z'])
+              v <- genJsonValue
+              pure (Key.fromString k, v)
+            pure (Aeson.Object (KeyMap.fromList kvs))
+        ]
+
+-- | QuickCheck generator for Embedding "text-embedding-3-small" 1536.
+genEmbedding1536 :: Gen (Embedding "text-embedding-3-small" 1536)
+genEmbedding1536 = do
+  floats <- vectorOf 1536 (choose (-10.0, 10.0))
+  pure (Embedding (Vector.fromList floats))
