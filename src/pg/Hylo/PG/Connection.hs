@@ -34,6 +34,7 @@ module Hylo.PG.Connection
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.DeepSeq (NFData (..))
 import Control.Monad (replicateM)
 import Data.ByteString (ByteString)
@@ -47,6 +48,18 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import Data.Time
+  ( Day
+  , LocalTime (..)
+  , TimeOfDay (..)
+  , UTCTime (..)
+  , defaultTimeLocale
+  , fromGregorian
+  , parseTimeM
+  )
+import Data.Time.Format.ISO8601 (iso8601ParseM)
+import Data.UUID (UUID)
+import qualified Data.UUID as UUID
 import qualified Hasql.Connection as C
 import qualified Hasql.Connection.Setting as S
 import qualified Hasql.Connection.Setting.Connection as SC
@@ -242,26 +255,55 @@ interpolateParams sql params = go sql
 
 -- | Value encoder for a single bound parameter based on its inferred logical/SQL type.
 boundParamValueEncoder :: Text -> Enc.Value Text
-boundParamValueEncoder pType = case pType of
-  "integer" -> contramap parseOrZero Enc.int4
-  "int4" -> contramap parseOrZero Enc.int4
-  "bigint" -> contramap parseOrZero Enc.int8
-  "int8" -> contramap parseOrZero Enc.int8
-  "smallint" -> contramap parseOrZero Enc.int2
-  "int2" -> contramap parseOrZero Enc.int2
-  "boolean" -> contramap (\t -> t == "true" || t == "TRUE" || t == "t") Enc.bool
-  "bool" -> contramap (\t -> t == "true" || t == "TRUE" || t == "t") Enc.bool
-  "double precision" -> contramap parseOrZero Enc.float8
-  "float8" -> contramap parseOrZero Enc.float8
-  "numeric" -> contramap parseOrZero Enc.float8
-  "real" -> contramap parseOrZero Enc.float4
-  "float4" -> contramap parseOrZero Enc.float4
-  "bytea" -> contramap TE.encodeUtf8 Enc.bytea
-  "unknown" -> contramap TE.encodeUtf8 Enc.unknown
-  _ -> Enc.text
+boundParamValueEncoder pType
+  | pType == "integer" || pType == "int4" = contramap parseOrZero Enc.int4
+  | pType == "bigint" || pType == "int8" = contramap parseOrZero Enc.int8
+  | pType == "smallint" || pType == "int2" = contramap parseOrZero Enc.int2
+  | pType == "boolean" || pType == "bool" =
+      contramap (\t -> t == "true" || t == "TRUE" || t == "t") Enc.bool
+  | pType == "double precision" || pType == "float8" || pType == "numeric" =
+      contramap parseOrZero Enc.float8
+  | pType == "real" || pType == "float4" = contramap parseOrZero Enc.float4
+  | pType == "bytea" = contramap TE.encodeUtf8 Enc.bytea
+  | pType == "uuid" = contramap parseUUID Enc.uuid
+  | pType == "timestamptz" = contramap parseUTCTime Enc.timestamptz
+  | pType == "timestamp" = contramap parseLocalTime Enc.timestamp
+  | pType == "date" = contramap parseDay Enc.date
+  | pType == "jsonb" = contramap TE.encodeUtf8 Enc.jsonbBytes
+  | pType == "json" = contramap TE.encodeUtf8 Enc.jsonBytes
+  | pType == "vector" || "vector(" `T.isPrefixOf` pType = contramap TE.encodeUtf8 Enc.unknown
+  | pType == "unknown" = contramap TE.encodeUtf8 Enc.unknown
+  | otherwise = Enc.text
   where
     parseOrZero :: (Num a, Read a) => Text -> a
     parseOrZero = fromMaybe 0 . readMaybe . T.unpack
+
+    parseUUID :: Text -> UUID
+    parseUUID = fromMaybe UUID.nil . UUID.fromText
+
+    parseUTCTime :: Text -> UTCTime
+    parseUTCTime t =
+      fromMaybe (UTCTime (fromGregorian 2000 1 1) 0) $
+        iso8601ParseM (T.unpack t)
+          <|> readMaybe (T.unpack t)
+          <|> parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S%Q%Z" (T.unpack t)
+          <|> parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S%Q" (T.unpack t)
+          <|> parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S" (T.unpack t)
+
+    parseLocalTime :: Text -> LocalTime
+    parseLocalTime t =
+      fromMaybe (LocalTime (fromGregorian 2000 1 1) (TimeOfDay 0 0 0)) $
+        iso8601ParseM (T.unpack t)
+          <|> readMaybe (T.unpack t)
+          <|> parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S%Q" (T.unpack t)
+          <|> parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S" (T.unpack t)
+
+    parseDay :: Text -> Day
+    parseDay t =
+      fromMaybe (fromGregorian 2000 1 1) $
+        iso8601ParseM (T.unpack t)
+          <|> readMaybe (T.unpack t)
+          <|> parseTimeM True defaultTimeLocale "%Y-%m-%d" (T.unpack t)
 
 -- | Construct a Hasql parameter encoder for a dynamic list of bound parameters.
 buildParamsEncoder :: [BoundParam] -> Enc.Params [BoundParam]

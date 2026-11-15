@@ -1,4 +1,6 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
 Module      : Hylo.PG.Codec.Binary
@@ -6,10 +8,6 @@ Description : PostgreSQL binary wire protocol codecs (protocol 3.0 / libpq)
 Copyright   : (c) 2026 Tushar Adhatrao
 License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
-
-PostgreSQL protocol version 3.0 binary wire codecs for primitive and composite
-types, supporting zero-intermediate-string marshalling directly over network byte
-buffers.
 -}
 module Hylo.PG.Codec.Binary
   ( -- * Re-exports from Core Codec
@@ -30,7 +28,7 @@ module Hylo.PG.Codec.Binary
   , tripleCodec
   , quadCodec
 
-    -- * Primitive Value Codecs
+    -- * Primitive & Domain Value Codecs
   , boolCodec
   , int16Codec
   , int32Codec
@@ -41,6 +39,14 @@ module Hylo.PG.Codec.Binary
   , textCodec
   , stringCodec
   , byteStringCodec
+  , uuidCodec
+  , utcTimeCodec
+  , dayCodec
+  , jsonbCodec
+  , jsonCodec
+  , embeddingCodec
+  , arrayCodec
+  , arrayCodecWithOid
 
     -- * Specification Composite Codec
   , compositeCodec
@@ -56,6 +62,13 @@ module Hylo.PG.Codec.Binary
   , textCol
   , stringCol
   , byteStringCol
+  , uuidCol
+  , utcTimeCol
+  , dayCol
+  , jsonbCol
+  , jsonCol
+  , embeddingCol
+  , arrayCol
   , idCol
 
     -- * PostgreSQL Type OIDs
@@ -68,6 +81,12 @@ module Hylo.PG.Codec.Binary
   , float4Oid
   , float8Oid
   , varcharOid
+  , uuidOid
+  , timestamptzOid
+  , timestampOid
+  , dateOid
+  , jsonbOid
+  , jsonOid
 
     -- * Binary Parsing Helpers
   , readInt16BE
@@ -75,14 +94,29 @@ module Hylo.PG.Codec.Binary
   , readWord64BE
   ) where
 
+import qualified Data.Aeson as Aeson
 import Data.Bits (shiftL, (.|.))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Builder as Builder
+import qualified Data.ByteString.Lazy as BSL
 import Data.Int (Int16, Int32, Int64)
+import Data.Ratio ((%))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import Data.Time
+  ( Day
+  , NominalDiffTime
+  , UTCTime (..)
+  , addDays
+  , addUTCTime
+  , diffDays
+  , diffUTCTime
+  , fromGregorian
+  )
+import Data.UUID (UUID)
+import qualified Data.UUID as UUID
 import Data.Word (Word16, Word32, Word64)
 import GHC.Float
   ( castDoubleToWord64
@@ -90,6 +124,7 @@ import GHC.Float
   , castWord32ToFloat
   , castWord64ToDouble
   )
+import GHC.TypeLits (KnownNat)
 import Hylo.Core.Codec
   ( Codec (..)
   , Decoder (..)
@@ -112,12 +147,28 @@ import Hylo.Core.Codec
   , tripleCodec
   )
 import Hylo.Core.Key (Id)
+import Hylo.PG.Vector (Embedding (..), decodeBinaryVector, encodeBinaryVector)
 
 --------------------------------------------------------------------------------
 -- PostgreSQL Type OIDs
 --------------------------------------------------------------------------------
 
-boolOid, byteaOid, int8Oid, int2Oid, int4Oid, textOid, float4Oid, float8Oid, varcharOid :: Word32
+boolOid
+  , byteaOid
+  , int8Oid
+  , int2Oid
+  , int4Oid
+  , textOid
+  , float4Oid
+  , float8Oid
+  , varcharOid
+  , uuidOid
+  , timestamptzOid
+  , timestampOid
+  , dateOid
+  , jsonbOid
+  , jsonOid ::
+    Word32
 boolOid = 16
 byteaOid = 17
 int8Oid = 20
@@ -127,6 +178,12 @@ textOid = 25
 float4Oid = 700
 float8Oid = 701
 varcharOid = 1043
+uuidOid = 2950
+timestamptzOid = 1184
+timestampOid = 1114
+dateOid = 1082
+jsonbOid = 3802
+jsonOid = 114
 
 --------------------------------------------------------------------------------
 -- Primitive Value Codecs
@@ -232,6 +289,168 @@ byteStringCodec =
     (\bs -> (fromIntegral (BS.length bs), Builder.byteString bs))
     Right
 
+-- | PostgreSQL epoch date (2000-01-01).
+pgEpochDay :: Day
+pgEpochDay = fromGregorian 2000 1 1
+
+-- | PostgreSQL epoch timestamp (2000-01-01 00:00:00 UTC).
+pgEpochUTCTime :: UTCTime
+pgEpochUTCTime = UTCTime pgEpochDay 0
+
+-- | Codec for PostgreSQL 'uuid' (OID 2950, 16-byte binary wire representation).
+uuidCodec :: ValueCodec UUID
+uuidCodec =
+  makeFramedFixedCodec
+    16
+    (Builder.lazyByteString . UUID.toByteString)
+    ( \bs ->
+        if BS.length bs < 16
+          then Left "Buffer underflow for 16-byte binary UUID"
+          else case UUID.fromByteString (BSL.fromStrict bs) of
+            Nothing -> Left "Invalid binary UUID payload"
+            Just u -> Right u
+    )
+
+-- | Codec for PostgreSQL 'timestamptz' (OID 1184, 8-byte signed Int64 microseconds since 2000-01-01).
+utcTimeCodec :: ValueCodec UTCTime
+utcTimeCodec =
+  makeFramedFixedCodec
+    8
+    ( \t ->
+        let diffSec = diffUTCTime t pgEpochUTCTime
+            micros = round (toRational diffSec * 1000000) :: Int64
+         in Builder.int64BE micros
+    )
+    ( \bs ->
+        if BS.length bs < 8
+          then Left "Buffer too short for timestamptz (expected 8 bytes)"
+          else
+            let micros = readInt64BE bs
+                diffSec = fromRational (toInteger micros % 1000000) :: NominalDiffTime
+             in Right (addUTCTime diffSec pgEpochUTCTime)
+    )
+
+-- | Codec for PostgreSQL 'date' (OID 1082, 4-byte Int32 days since 2000-01-01).
+dayCodec :: ValueCodec Day
+dayCodec =
+  makeFramedFixedCodec
+    4
+    (\d -> Builder.int32BE (fromIntegral (diffDays d pgEpochDay)))
+    ( \bs ->
+        if BS.length bs < 4
+          then Left "Buffer too short for date (expected 4 bytes)"
+          else
+            let daysDiff = readInt32BE bs
+             in Right (addDays (fromIntegral daysDiff) pgEpochDay)
+    )
+
+-- | Codec for PostgreSQL 'jsonb' (OID 3802, 1-byte version header 0x01 followed by UTF-8 JSON text).
+jsonbCodec :: ValueCodec Aeson.Value
+jsonbCodec =
+  makeFramedValueCodec
+    ( \val ->
+        let bs = BSL.toStrict (Aeson.encode val)
+         in (1 + fromIntegral (BS.length bs), Builder.word8 1 <> Builder.byteString bs)
+    )
+    ( \bs ->
+        if BS.null bs
+          then Left "Buffer underflow for jsonb (expected at least 1-byte version header)"
+          else
+            let ver = BS.index bs 0
+             in if ver /= 1
+                  then Left ("Unsupported jsonb binary wire version: " <> T.pack (show ver))
+                  else case Aeson.eitherDecodeStrict' (BS.drop 1 bs) of
+                    Left err -> Left ("Failed to decode jsonb payload: " <> T.pack err)
+                    Right val -> Right val
+    )
+
+-- | Codec for PostgreSQL 'json' (OID 114, UTF-8 JSON text).
+jsonCodec :: ValueCodec Aeson.Value
+jsonCodec =
+  makeFramedValueCodec
+    ( \val ->
+        let bs = BSL.toStrict (Aeson.encode val)
+         in (fromIntegral (BS.length bs), Builder.byteString bs)
+    )
+    ( \bs -> case Aeson.eitherDecodeStrict' bs of
+        Left err -> Left ("Failed to decode json payload: " <> T.pack err)
+        Right val -> Right val
+    )
+
+-- | Codec for pgvector 'vector' (wrapping 'encodeBinaryVector' and 'decodeBinaryVector').
+embeddingCodec ::
+  forall model dim.
+  (KnownNat dim) =>
+  ValueCodec (Embedding model dim)
+embeddingCodec =
+  makeFramedValueCodec
+    ( \emb ->
+        let bs = encodeBinaryVector emb
+         in (fromIntegral (BS.length bs), Builder.byteString bs)
+    )
+    ( \bs -> case decodeBinaryVector bs of
+        Left err -> Left (T.pack err)
+        Right emb -> Right emb
+    )
+
+-- | Codec for 1-dimensional PostgreSQL binary arrays with explicit element type OID.
+arrayCodecWithOid :: Word32 -> ValueCodec a -> ValueCodec [a]
+arrayCodecWithOid elemOid elemCodec =
+  makeFramedValueCodec
+    ( \xs ->
+        let count = fromIntegral (length xs) :: Int32
+            elementsBuilder = mconcat (map (codecEncoder elemCodec) xs)
+            elementsBytes = BSL.toStrict (Builder.toLazyByteString elementsBuilder)
+            (hdrLen, hdrBuilder) =
+              if count == 0
+                then
+                  ( 12
+                  , Builder.int32BE 0
+                      <> Builder.int32BE 0
+                      <> Builder.word32BE elemOid
+                  )
+                else
+                  ( 20
+                  , Builder.int32BE 1
+                      <> Builder.int32BE 0
+                      <> Builder.word32BE elemOid
+                      <> Builder.int32BE count
+                      <> Builder.int32BE 1
+                  )
+            totalLen = hdrLen + fromIntegral (BS.length elementsBytes)
+         in (totalLen, hdrBuilder <> Builder.byteString elementsBytes)
+    )
+    ( \bs ->
+        if BS.length bs < 12
+          then Left "Array binary buffer underflow"
+          else
+            let ndim = readInt32BE bs
+             in if ndim == 0
+                  then Right []
+                  else
+                    if ndim /= 1
+                      then Left ("Multi-dimensional arrays are not currently supported: ndim = " <> T.pack (show ndim))
+                      else
+                        if BS.length bs < 20
+                          then Left "Array header underflow for 1-D array"
+                          else
+                            let dimSize = readInt32BE (BS.drop 12 bs)
+                                elemsPayload = BS.drop 20 bs
+                                decodeElements 0 rest acc =
+                                  if BS.null rest
+                                    then Right (reverse acc)
+                                    else Left "Trailing unparsed bytes in array payload"
+                                decodeElements n rest acc =
+                                  case runDecoder (codecDecoder elemCodec) rest of
+                                    Left err -> Left err
+                                    Right (x, rest') -> decodeElements (n - 1) rest' (x : acc)
+                             in decodeElements dimSize elemsPayload []
+    )
+
+-- | Codec for 1-dimensional PostgreSQL binary arrays.
+arrayCodec :: ValueCodec a -> ValueCodec [a]
+arrayCodec = arrayCodecWithOid 0
+
 --------------------------------------------------------------------------------
 -- PRD Aliases
 --------------------------------------------------------------------------------
@@ -265,6 +484,27 @@ stringCol = stringCodec
 
 byteStringCol :: ValueCodec ByteString
 byteStringCol = byteStringCodec
+
+uuidCol :: ValueCodec UUID
+uuidCol = uuidCodec
+
+utcTimeCol :: ValueCodec UTCTime
+utcTimeCol = utcTimeCodec
+
+dayCol :: ValueCodec Day
+dayCol = dayCodec
+
+jsonbCol :: ValueCodec Aeson.Value
+jsonbCol = jsonbCodec
+
+jsonCol :: ValueCodec Aeson.Value
+jsonCol = jsonCodec
+
+embeddingCol :: (KnownNat dim) => ValueCodec (Embedding model dim)
+embeddingCol = embeddingCodec
+
+arrayCol :: ValueCodec a -> ValueCodec [a]
+arrayCol = arrayCodec
 
 idCol :: ValueCodec a -> ValueCodec (Id table a)
 idCol = idCodec

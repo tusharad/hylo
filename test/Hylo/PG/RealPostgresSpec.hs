@@ -1,6 +1,9 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE NoFieldSelectors #-}
 
 {- |
 Module      : Hylo.PG.RealPostgresSpec
@@ -11,17 +14,49 @@ Maintainer  : tusharadhatrao@gmail.com
 -}
 module Hylo.PG.RealPostgresSpec (spec) where
 
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy as BSL
+import Data.Ratio ((%))
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Data.Time
+  ( Day
+  , NominalDiffTime
+  , UTCTime (..)
+  , addUTCTime
+  , fromGregorian
+  )
+import Data.Time.Format.ISO8601 (iso8601Show)
+import Data.UUID (UUID)
+import qualified Data.UUID as UUID
+import qualified Data.Vector as Vector
 import qualified Hasql.Decoders as Dec
 import qualified Hasql.Encoders as Enc
 import qualified Hasql.Session as Sess
 import qualified Hasql.Statement as Stmt
 import Hylo.Backend.Capability (PGVersion (..), Postgres)
-import Hylo.Core.Transaction (Tx (..), TxError (..), recordMutation, txFail, withSavepoint)
+import Hylo.Core.Codec (Codec (..), field)
+import Hylo.Core.Transaction
+  ( BoundParam (..)
+  , Tx (..)
+  , TxError (..)
+  , recordMutation
+  , recordMutationWithParams
+  , txFail
+  , withSavepoint
+  )
 import Hylo.Core.TypeError (TxMode (..))
+import Hylo.PG.Codec.Binary
+  ( dayCodec
+  , embeddingCodec
+  , jsonbCodec
+  , utcTimeCodec
+  , uuidCodec
+  )
 import Hylo.PG.Connection
   ( Pool (..)
+  , executePreparedQuery
   , executeSession
   , executeSql
   , runTx
@@ -32,6 +67,7 @@ import Hylo.PG.Transaction.Retry
   , runTxWithRetry
   , simulateWriteConflictOnce
   )
+import Hylo.PG.Vector (Embedding (..), renderVectorText)
 import Hylo.Test.Docker (getTestPgVersion, withTestPostgres)
 import Test.Hspec
 
@@ -374,3 +410,101 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
                   False
           qRes <- executeSession p (Sess.statement () checkStmt)
           qRes `shouldBe` Right "serializable_ok"
+
+  it
+    "User Story 12 Acceptance Criterion: round-trips UUID, pre/post-2000 UTCTime, Day, JSONB, and Embedding 1536 against real PostgreSQL via binary wire codecs"
+    $ withTestPostgres
+    $ \p -> do
+      case poolActiveConnection p of
+        Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
+        Just _ -> do
+          _ <-
+            executeSql
+              p
+              "DROP TABLE IF EXISTS test_binary_codecs CASCADE; \
+              \CREATE TABLE test_binary_codecs ( \
+              \  id INT PRIMARY KEY, \
+              \  val_uuid UUID NOT NULL, \
+              \  val_ts_pre TIMESTAMPTZ NOT NULL, \
+              \  val_ts_post TIMESTAMPTZ NOT NULL, \
+              \  val_day DATE NOT NULL, \
+              \  val_jsonb JSONB NOT NULL, \
+              \  val_vec vector(1536) NOT NULL \
+              \);"
+
+          let testUuid = UUID.fromWords 0xa0eebc99 0x9c0b4ef8 0xbb6d6bb9 0xbd380a11
+              testTsPre =
+                addUTCTime
+                  (fromRational ((-140918400000000) % 1000000) :: NominalDiffTime)
+                  (UTCTime (fromGregorian 2000 1 1) 0)
+              testTsPost =
+                addUTCTime
+                  (fromRational (764582400000000 % 1000000) :: NominalDiffTime)
+                  (UTCTime (fromGregorian 2000 1 1) 0)
+              testDay = fromGregorian 2024 3 25
+              testJsonb =
+                Aeson.object
+                  ["title" Aeson..= ("hylo" :: Text), "version" Aeson..= (1 :: Int), "active" Aeson..= True]
+              testVec = Embedding (Vector.replicate 1536 0.125) :: Embedding "text-embedding-3-small" 1536
+
+          let insertTx :: Tx (Postgres 'PG17) 'ReadWrite ()
+              insertTx =
+                recordMutationWithParams
+                  "INSERT INTO test_binary_codecs (id, val_uuid, val_ts_pre, val_ts_post, val_day, val_jsonb, val_vec) \
+                  \VALUES ($1, $2, $3, $4, $5, $6, $7);"
+                  [ BoundParam 1 "1" "int4"
+                  , BoundParam 2 (UUID.toText testUuid) "uuid"
+                  , BoundParam 3 (T.pack (iso8601Show testTsPre)) "timestamptz"
+                  , BoundParam 4 (T.pack (iso8601Show testTsPost)) "timestamptz"
+                  , BoundParam 5 (T.pack (iso8601Show testDay)) "date"
+                  , BoundParam 6 (TE.decodeUtf8 (BSL.toStrict (Aeson.encode testJsonb))) "jsonb"
+                  , BoundParam 7 (renderVectorText testVec) "vector"
+                  ]
+
+          insertRes <- runTx p ReadWrite insertTx
+          insertRes `shouldBe` Right ()
+
+          rowsRes <-
+            executePreparedQuery
+              p
+              "SELECT val_uuid, val_ts_pre, val_ts_post, val_day, val_jsonb, val_vec \
+              \FROM test_binary_codecs WHERE id = $1;"
+              [BoundParam 1 "1" "int4"]
+              binaryRowCodec
+              6
+
+          rowsRes
+            `shouldBe` Right
+              [ BinaryRow
+                  { u = testUuid
+                  , tsPre = testTsPre
+                  , tsPost = testTsPost
+                  , d = testDay
+                  , j = testJsonb
+                  , v = testVec
+                  }
+              ]
+
+-- -----------------------------------------------------------------------------
+-- User Story 12 Test Row Type & Codec
+-- -----------------------------------------------------------------------------
+
+data BinaryRow = BinaryRow
+  { u :: !UUID
+  , tsPre :: !UTCTime
+  , tsPost :: !UTCTime
+  , d :: !Day
+  , j :: !Aeson.Value
+  , v :: !(Embedding "text-embedding-3-small" 1536)
+  }
+  deriving (Eq, Show)
+
+binaryRowCodec :: Codec BinaryRow BinaryRow
+binaryRowCodec =
+  BinaryRow
+    <$> field (.u) uuidCodec
+    <*> field (.tsPre) utcTimeCodec
+    <*> field (.tsPost) utcTimeCodec
+    <*> field (.d) dayCodec
+    <*> field (.j) jsonbCodec
+    <*> field (.v) embeddingCodec
