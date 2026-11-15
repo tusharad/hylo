@@ -12,6 +12,7 @@ import qualified Hylo.Core.CodecSpec as CodecSpec
 import qualified Hylo.Core.TableSpec as TableSpec
 import qualified Hylo.Core.TransactionSpec as TransactionSpec
 import qualified Hylo.Core.TypeErrorSpec as TypeErrorSpec
+import qualified Hylo.Migrate.DiffSpec as DiffSpec
 import qualified Hylo.PG.Compiler.AggregateSpec as AggregateSpec
 import qualified Hylo.PG.Compiler.CTESpec as CTESpec
 import qualified Hylo.PG.Compiler.JoinFlattenerSpec as JoinFlattenerSpec
@@ -43,3 +44,4 @@ main = hspec $ do
   VectorSpec.spec
   HybridSpec.spec
   QueryToolSpec.spec
+  DiffSpec.spec

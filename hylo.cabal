@@ -51,6 +51,11 @@ library
       Hylo.Core.Transaction
       Hylo.Core.TypeError
       Hylo.Core.TypeLevel.Nat
+      Hylo.Migrate.AST
+      Hylo.Migrate.Catalog
+      Hylo.Migrate.Catalog.PG
+      Hylo.Migrate.CodeGen
+      Hylo.Migrate.Diff
       Hylo.PG
       Hylo.PG.Codec.Binary
       Hylo.PG.Compiler.Aggregate
@@ -84,6 +89,7 @@ library
     , aeson-qq >=0.8 && <1
     , base >=4.7 && <5
     , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
     , deepseq >=1.4 && <2
     , scientific ==0.3.*
     , stm >=2.5 && <3
@@ -105,6 +111,7 @@ executable hylo-exe
     , aeson-qq >=0.8 && <1
     , base >=4.7 && <5
     , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
     , deepseq >=1.4 && <2
     , hylo
     , scientific ==0.3.*
@@ -124,6 +131,7 @@ test-suite hylo-test
       Hylo.Core.TableSpec
       Hylo.Core.TransactionSpec
       Hylo.Core.TypeErrorSpec
+      Hylo.Migrate.DiffSpec
       Hylo.PG.Compiler.AggregateSpec
       Hylo.PG.Compiler.CTESpec
       Hylo.PG.Compiler.JoinFlattenerSpec
@@ -139,6 +147,7 @@ test-suite hylo-test
       Test.Hylo.Core.CodecSpec
       Test.Hylo.Core.TransactionSpec
       Test.Hylo.Core.TypeErrorSpec
+      Test.Hylo.Migrate.DiffSpec
       Test.Hylo.PG.Compiler.AggregateSpec
       Test.Hylo.PG.Compiler.CTESpec
       Test.Hylo.PG.Compiler.JoinFlattenerSpec
@@ -161,6 +170,7 @@ test-suite hylo-test
     , aeson-qq >=0.8 && <1
     , base >=4.7 && <5
     , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
     , deepseq >=1.4
     , hspec >=2.11
     , hylo

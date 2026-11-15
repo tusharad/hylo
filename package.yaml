@@ -27,6 +27,7 @@ dependencies:
 - aeson-qq >= 0.8 && < 1
 - scientific >= 0.3 && < 0.4
 - template-haskell >= 2.16 && < 3
+- containers >= 0.6 && < 0.8
 
 ghc-options:
 - -Wall
