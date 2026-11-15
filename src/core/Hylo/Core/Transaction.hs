@@ -27,6 +27,7 @@ module Hylo.Core.Transaction
   ( -- * Transaction Monad & Phantom Modes
     Tx (..)
   , TxMode (..)
+  , KnownTxMode (..)
   , TxError (..)
   , TxOp (..)
   , BoundParam (..)
@@ -44,6 +45,12 @@ module Hylo.Core.Transaction
   , onCommit
   , onRollback
 
+    -- * In-Memory Cursor Simulation
+  , registerCursorData
+  , getCursorData
+  , takeCursorRows
+  , removeCursorData
+
     -- * Simulation Helpers for Fault-Tolerance Testing
   , simulateWriteConflictOnce
   , simulateWriteConflicts
@@ -59,9 +66,11 @@ module Hylo.Core.Transaction
 
 import Control.DeepSeq (NFData (..))
 import Control.Monad.IO.Class (MonadIO (..))
+import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import Hylo.Core.TypeError (AssertNoIO (..), TxMode (..))
 
@@ -97,6 +106,16 @@ data TxOp
   | OpRollbackSavepoint !Int !Text
   deriving (Eq, Show, Generic)
 
+-- | Typeclass witnessing the runtime value of a type-level transaction mode.
+class KnownTxMode (mode :: TxMode) where
+  txModeVal :: Proxy mode -> TxMode
+
+instance KnownTxMode 'ReadOnly where
+  txModeVal _ = ReadOnly
+
+instance KnownTxMode 'ReadWrite where
+  txModeVal _ = ReadWrite
+
 -- | Internal state tracked during transaction evaluation.
 data TxState = TxState
   { txSavepointSeq :: !Int
@@ -105,14 +124,15 @@ data TxState = TxState
   , txAttempt :: !Int
   , txCommitHooks :: ![IO ()]
   , txRollbackHooks :: ![IO ()]
+  , txCursorStore :: ![(Text, Dynamic)]
   }
 
 instance Eq TxState where
-  TxState s1 o1 st1 a1 _ _ == TxState s2 o2 st2 a2 _ _ =
+  TxState s1 o1 st1 a1 _ _ _ == TxState s2 o2 st2 a2 _ _ _ =
     s1 == s2 && o1 == o2 && st1 == st2 && a1 == a2
 
 instance Show TxState where
-  showsPrec d (TxState s o st a ch rh) =
+  showsPrec d (TxState s o st a ch rh cs) =
     showParen (d > 10) $
       showString "TxState { txSavepointSeq = "
         . shows s
@@ -127,11 +147,14 @@ instance Show TxState where
         . showString " hooks>"
         . showString ", txRollbackHooks = <"
         . shows (length rh)
-        . showString " hooks> }"
+        . showString " hooks>"
+        . showString ", txCursorStore = <"
+        . shows (length cs)
+        . showString " cursors> }"
 
 -- | Initial state for a new transaction computation.
 initialTxState :: TxState
-initialTxState = TxState 0 [] [] 0 [] []
+initialTxState = TxState 0 [] [] 0 [] [] []
 
 -- | Pure operational Transaction monad parameterized by backend marker and phantom mode.
 data Tx (db :: k) (mode :: TxMode) a where
@@ -201,6 +224,7 @@ withSavepoint subTx = TxAction $ \st ->
       storeSnapshot = txStore st
       commitHooksSnapshot = txCommitHooks st
       rollbackHooksSnapshot = txRollbackHooks st
+      cursorStoreSnapshot = txCursorStore st
    in case executeTx subTx stBefore of
         (Left err, stAfterFail) ->
           let stRolledBack =
@@ -208,6 +232,7 @@ withSavepoint subTx = TxAction $ \st ->
                   { txStore = storeSnapshot
                   , txCommitHooks = commitHooksSnapshot
                   , txRollbackHooks = rollbackHooksSnapshot
+                  , txCursorStore = cursorStoreSnapshot
                   , txOperations = txOperations stAfterFail ++ [OpRollbackSavepoint token spName]
                   }
            in (Right (Left err), stRolledBack)
@@ -217,6 +242,35 @@ withSavepoint subTx = TxAction $ \st ->
                   { txOperations = txOperations stAfterSuccess ++ [OpReleaseSavepoint token spName]
                   }
            in (Right (Right val), stReleased)
+
+-- | Register simulated in-memory rows for a cursor by name.
+registerCursorData :: forall k (db :: k) mode a. Typeable a => Text -> [a] -> Tx db mode ()
+registerCursorData name rows = TxAction $ \st ->
+  (Right (), st {txCursorStore = (name, toDyn rows) : filter ((/= name) . fst) (txCursorStore st)})
+
+-- | Retrieve remaining simulated cursor rows by name.
+getCursorData :: forall k (db :: k) mode a. Typeable a => Text -> Tx db mode (Maybe [a])
+getCursorData name = TxAction $ \st ->
+  case lookup name (txCursorStore st) of
+    Just dyn -> (Right (fromDynamic dyn), st)
+    Nothing -> (Right Nothing, st)
+
+-- | Consume at most @n@ simulated rows from a registered cursor by name.
+takeCursorRows :: forall k (db :: k) mode a. Typeable a => Text -> Int -> Tx db mode [a]
+takeCursorRows name count = TxAction $ \st ->
+  case lookup name (txCursorStore st) of
+    Just dyn -> case fromDynamic dyn of
+      Just (rows :: [a]) ->
+        let (batch, rest) = splitAt count rows
+            st' = st {txCursorStore = (name, toDyn rest) : filter ((/= name) . fst) (txCursorStore st)}
+         in (Right batch, st')
+      Nothing -> (Right [], st)
+    Nothing -> (Right [], st)
+
+-- | Remove a registered cursor from the in-memory cursor store.
+removeCursorData :: forall k (db :: k) mode. Text -> Tx db mode ()
+removeCursorData name = TxAction $ \st ->
+  (Right (), st {txCursorStore = filter ((/= name) . fst) (txCursorStore st)})
 
 -- | Execute a 'Tx' action against an explicit initial state.
 executeTx :: forall k (db :: k) mode a. Tx db mode a -> TxState -> (Either TxError a, TxState)

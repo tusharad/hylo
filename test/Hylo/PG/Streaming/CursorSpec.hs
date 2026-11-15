@@ -56,6 +56,7 @@ import Hylo.PG.Streaming.Cursor
   , streamDrain
   , streamFold
   , streamFromList
+  , streamQueryWith
   , streamTake
   , streamToList
   )
@@ -312,3 +313,31 @@ spec = describe "Epic 10: Binary Cursor Streaming & Keyset Pagination" $ do
     it "streamDrain discards all elements without retaining them in memory" $ do
       let stream = streamFromList 5 [1 .. 50 :: Int]
       runTx (streamDrain stream) `shouldBe` ()
+
+    describe "User Story 10: Server-Side Binary Cursor Execution & Batching" $ do
+      it
+        "User Story 10 Acceptance Criterion 3: streamQuery over a 25-row dataset with batchSize = 10 executes 3 batch fetches (10, 10, 5) and terminates cleanly"
+        $ do
+          let dataset = [1 .. 25 :: Int64]
+              q = do
+                doc <- each documentTable
+                pure doc.id
+              stream = streamQueryWith 10 dataset q
+              (res, finalSt) = executeTx (streamToList stream) initialTxState
+          case res of
+            Left err -> expectationFailure ("streamQuery failed: " ++ show err)
+            Right rows -> do
+              rows `shouldBe` dataset
+              let ops = txOperations finalSt
+                  declareOps = [sql | OpQuery (sql, _) <- ops, "DECLARE" `T.isInfixOf` sql]
+                  fetchOps = [sql | OpQuery (sql, _) <- ops, "FETCH FORWARD" `T.isInfixOf` sql]
+                  closeOps = [sql | OpQuery (sql, _) <- ops, "CLOSE" `T.isInfixOf` sql]
+              length declareOps `shouldBe` 1
+              length fetchOps `shouldBe` 3
+              fetchOps
+                `shouldBe` [ "FETCH FORWARD 10 FROM \"cur_0\""
+                           , "FETCH FORWARD 10 FROM \"cur_0\""
+                           , "FETCH FORWARD 10 FROM \"cur_0\""
+                           ]
+              length closeOps `shouldBe` 1
+              closeOps `shouldBe` ["CLOSE \"cur_0\""]

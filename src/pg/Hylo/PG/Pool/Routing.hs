@@ -36,7 +36,7 @@ module Hylo.PG.Pool.Routing
 
 import Control.DeepSeq (NFData (..))
 import Data.Text (Text)
-import Hylo.Core.Transaction (Tx (..), TxError (..), TxMode (..))
+import Hylo.Core.Transaction (KnownTxMode (..), Tx (..), TxError (..), TxMode (..))
 import Hylo.PG.Connection (Pool (..), createPool, defaultPool, runTx)
 import Hylo.PG.Transaction.Retry
   ( IsolationLevel (..)
@@ -126,6 +126,7 @@ runReadOnlyTx cluster tx = do
 
 -- | Execute a transaction against the cluster with automatic retry upon serialization conflict or deadlock.
 runClusterTxWithRetry ::
+  KnownTxMode mode =>
   RetryPolicy ->
   ClusterPool ->
   TxMode ->

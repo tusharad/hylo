@@ -33,7 +33,9 @@ import Control.Concurrent.STM
   )
 import Data.Either (isLeft, isRight)
 import Data.Int (Int64)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
+import Hylo.Backend.Capability (PGVersion (..))
 import Hylo.Core
 import Hylo.Core.Query
   ( Postgres
@@ -115,7 +117,8 @@ spec = describe "Epic 12: Automatic Retry Engine & Commit Hooks" $ do
   describe "12.4 Executable Oracle Specification" $ do
     it "purges and re-accumulates onCommit hooks across serialization retries" $ do
       hookCounter <- newTVarIO (0 :: Int)
-      let txWithHook = do
+      let txWithHook :: Tx Postgres 'ReadWrite ()
+          txWithHook = do
             onCommit (atomically $ modifyTVar' hookCounter (+ 1))
             simulateSerializationFailureOnce
             pure ()
@@ -154,7 +157,8 @@ spec = describe "Epic 12: Automatic Retry Engine & Commit Hooks" $ do
          in ioProperty $ do
               commitCounter <- newTVarIO (0 :: Int)
               rollbackCounter <- newTVarIO (0 :: Int)
-              let tx = do
+              let tx :: Tx Postgres 'ReadWrite ()
+                  tx = do
                     onCommit (atomically $ modifyTVar' commitCounter (+ 1))
                     onRollback (atomically $ modifyTVar' rollbackCounter (+ 1))
                     simulateSerializationFailures k
@@ -170,7 +174,8 @@ spec = describe "Epic 12: Automatic Retry Engine & Commit Hooks" $ do
          in ioProperty $ do
               commitCounter <- newTVarIO (0 :: Int)
               rollbackCounter <- newTVarIO (0 :: Int)
-              let tx = do
+              let tx :: Tx Postgres 'ReadWrite ()
+                  tx = do
                     onCommit (atomically $ modifyTVar' commitCounter (+ 1))
                     onRollback (atomically $ modifyTVar' rollbackCounter (+ 1))
                     simulateSerializationFailures excessFailures
@@ -196,10 +201,11 @@ spec = describe "Epic 12: Automatic Retry Engine & Commit Hooks" $ do
   describe "Comprehensive Automatic Conflict Retry & Routing Combinators" $ do
     it "transparently resolves transient deadlock detection (40P01)" $ do
       counter <- newTVarIO (0 :: Int)
-      let tx = do
+      let tx :: Tx Postgres 'ReadWrite Text
+          tx = do
             onCommit (atomically $ modifyTVar' counter (+ 1))
             simulateDeadlockOnce
-            pure ("ok" :: Text)
+            pure "ok"
       res <- runTxWithRetry (fastRetryPolicy 3) pool Serializable tx
       res `shouldBe` Right "ok"
       runs <- readTVarIO counter
@@ -207,7 +213,8 @@ spec = describe "Epic 12: Automatic Retry Engine & Commit Hooks" $ do
 
     it "immediately aborts without retrying on permanent constraint violations" $ do
       counter <- newTVarIO (0 :: Int)
-      let tx = do
+      let tx :: Tx Postgres 'ReadWrite ()
+          tx = do
             onCommit (atomically $ modifyTVar' counter (+ 1))
             txFail (TxConstraintViolation "accounts" "unique_idx" "acc_1")
       res <- runTxWithRetry (fastRetryPolicy 5) pool Serializable tx
@@ -303,3 +310,22 @@ spec = describe "Epic 12: Automatic Retry Engine & Commit Hooks" $ do
         res40P01 `shouldBe` Right "committed_40P01"
         c2 <- readTVarIO counter40P01
         c2 `shouldBe` 1
+
+    it
+      "User Story 10 Acceptance Criterion 2: Calling runTxWithRetry on a Tx (Postgres 'PG17) 'ReadOnly a computation executes BEGIN TRANSACTION ISOLATION LEVEL ... READ ONLY;"
+      $ do
+        let modeVal = txModeVal (Proxy :: Proxy 'ReadOnly)
+        modeVal `shouldBe` ReadOnly
+        renderBeginTransaction Serializable modeVal <> ";"
+          `shouldBe` "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE READ ONLY;"
+        renderBeginTransaction ReadCommitted modeVal <> ";"
+          `shouldBe` "BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED READ ONLY;"
+        renderBeginTransaction RepeatableRead modeVal <> ";"
+          `shouldBe` "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;"
+
+        let txReadOnly :: Tx (Postgres 'PG17) 'ReadOnly Text
+            txReadOnly = do
+              onCommit (pure ())
+              pure "readonly_pg17_success"
+        res <- runTxWithRetry (fastRetryPolicy 3) pool Serializable txReadOnly
+        res `shouldBe` Right "readonly_pg17_success"

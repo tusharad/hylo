@@ -17,7 +17,8 @@ import qualified Hasql.Decoders as Dec
 import qualified Hasql.Encoders as Enc
 import qualified Hasql.Session as Sess
 import qualified Hasql.Statement as Stmt
-import Hylo.Core.Transaction (TxError (..), recordMutation, txFail, withSavepoint)
+import Hylo.Backend.Capability (PGVersion (..), Postgres)
+import Hylo.Core.Transaction (Tx (..), TxError (..), recordMutation, txFail, withSavepoint)
 import Hylo.Core.TypeError (TxMode (..))
 import Hylo.PG.Connection
   ( Pool (..)
@@ -356,10 +357,11 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
               "DROP TABLE IF EXISTS test_retry_pool CASCADE; \
               \CREATE TABLE test_retry_pool (id INT PRIMARY KEY, val TEXT);"
 
-          let tx = do
+          let tx :: Tx (Postgres 'PG17) 'ReadWrite Text
+              tx = do
                 simulateWriteConflictOnce
                 recordMutation "INSERT INTO test_retry_pool VALUES (1, 'serializable_ok');"
-                pure ("committed_after_retry" :: Text)
+                pure "committed_after_retry"
 
           res <- runTxWithRetry defaultRetryPolicy p Serializable tx
           res `shouldBe` Right "committed_after_retry"

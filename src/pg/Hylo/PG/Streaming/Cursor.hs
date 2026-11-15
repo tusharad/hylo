@@ -21,6 +21,7 @@ module Hylo.PG.Streaming.Cursor
   ( -- * Server-Side Cursor
     Cursor (..)
   , declareCursor
+  , declareCursorWithData
   , fetchBatch
   , closeCursor
   , renderDeclareCursor
@@ -39,17 +40,25 @@ module Hylo.PG.Streaming.Cursor
 
     -- * Query Streaming Combinator
   , streamQuery
+  , streamQueryWith
   ) where
 
 import Control.DeepSeq (NFData (..))
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Typeable (Typeable)
 import Hylo.Core.Query
   ( Postgres
   , Projectable
   , Query
   , Tx (..)
+  )
+import Hylo.Core.Transaction
+  ( recordQuery
+  , registerCursorData
+  , removeCursorData
+  , takeCursorRows
   )
 import Hylo.PG.Compiler.SQL (renderSQL)
 
@@ -86,17 +95,42 @@ declareCursor ::
   Int ->
   Query (Postgres v) a ->
   Tx (Postgres v) mode (Cursor (Postgres v) a)
-declareCursor name batchSize q =
+declareCursor name batchSize q = do
   let sql = renderSQL q
-   in TxReturn (Cursor name (max 1 batchSize) sql)
+      cur = Cursor name (max 1 batchSize) sql
+  recordQuery (renderDeclareCursor cur)
+  pure cur
+
+-- | Declare a server-side binary cursor with an in-memory simulated dataset.
+declareCursorWithData ::
+  (Projectable qres, Typeable row) =>
+  Text ->
+  Int ->
+  [row] ->
+  Query (Postgres v) qres ->
+  Tx (Postgres v) mode (Cursor (Postgres v) row)
+declareCursorWithData name batchSize rows q = do
+  cur <- declareCursor name batchSize q
+  registerCursorData name rows
+  pure (Cursor (cursorName cur) (cursorBatchSize cur) (cursorQuerySql cur))
 
 -- | Fetch a batch of records from an active cursor.
-fetchBatch :: Cursor (Postgres v) a -> Int -> Tx (Postgres v) mode [a]
-fetchBatch _ _ = TxReturn []
+fetchBatch ::
+  Typeable a =>
+  Cursor (Postgres v) a ->
+  Int ->
+  Tx (Postgres v) mode [a]
+fetchBatch cur count = do
+  recordQuery (renderFetchCursor cur count)
+  takeCursorRows (cursorName cur) count
 
 -- | Close an active server-side cursor.
-closeCursor :: Cursor (Postgres v) a -> Tx (Postgres v) mode ()
-closeCursor _ = TxReturn ()
+closeCursor ::
+  Cursor (Postgres v) a ->
+  Tx (Postgres v) mode ()
+closeCursor cur = do
+  recordQuery (renderCloseCursor cur)
+  removeCursorData (cursorName cur)
 
 -- | Functor pairing a yielded stream value with the rest of the stream.
 data Of a b = a :> b
@@ -181,13 +215,46 @@ streamFromList k = go
 {- | Stream query results in chunks using a server-side cursor.
 Employs a binary server-side cursor ('DECLARE ... NO SCROLL CURSOR WITHOUT HOLD'),
 fetching batches of @batchSize@ rows over the wire and yielding elements lazily.
+Terminates as soon as a batch returns fewer rows than @batchSize@.
 -}
 streamQuery ::
-  Projectable a =>
+  (Projectable a, Typeable a) =>
   Int ->
   Query (Postgres v) a ->
   Stream (Of a) (Tx (Postgres v) mode) ()
-streamQuery batchSize q =
-  let sql = renderSQL q
-      _cur = Cursor "cur_0" (max 1 batchSize) sql
-   in Effect $ pure $ Return ()
+streamQuery batchSize q = Effect $ do
+  cur <- declareCursor "cur_0" (max 1 batchSize) q
+  pure (fetchLoop cur (max 1 batchSize))
+
+-- | Stream query results in chunks over a simulated dataset using a server-side cursor.
+streamQueryWith ::
+  (Projectable qres, Typeable row) =>
+  Int ->
+  [row] ->
+  Query (Postgres v) qres ->
+  Stream (Of row) (Tx (Postgres v) mode) ()
+streamQueryWith batchSize rows q = Effect $ do
+  cur <- declareCursorWithData "cur_0" (max 1 batchSize) rows q
+  pure (fetchLoop cur (max 1 batchSize))
+
+-- | Internal cursor fetch loop yielding batches and terminating when batch < batchSize.
+fetchLoop ::
+  Typeable a =>
+  Cursor (Postgres v) a ->
+  Int ->
+  Stream (Of a) (Tx (Postgres v) mode) ()
+fetchLoop cur k = Effect $ do
+  batch <- fetchBatch cur k
+  if null batch
+    then do
+      closeCursor cur
+      pure (Return ())
+    else do
+      let yieldBatch [] next = next
+          yieldBatch (x : xs) next = Step (x :> yieldBatch xs next)
+      if length batch < k
+        then do
+          closeCursor cur
+          pure (yieldBatch batch (Return ()))
+        else
+          pure (yieldBatch batch (fetchLoop cur k))

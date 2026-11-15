@@ -21,6 +21,7 @@ import qualified Hylo.PG.Compiler.CTESpec as CTESpec
 import qualified Hylo.PG.Compiler.JoinFlattenerSpec as JoinFlattenerSpec
 import qualified Hylo.PG.Compiler.LateralSpec as LateralSpec
 import qualified Hylo.PG.Compiler.WindowSpec as WindowSpec
+import qualified Hylo.PG.ConnectionSpec as ConnectionSpec
 import qualified Hylo.PG.Mutation.BulkSpec as BulkSpec
 import qualified Hylo.PG.Mutation.ChangesetSpec as PGChangesetSpec
 import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
@@ -56,4 +57,5 @@ main = hspec $ do
   LinterSpec.spec
   CapabilitySpec.spec
   BuilderSpec.spec
+  ConnectionSpec.spec
   RealPostgresSpec.spec
