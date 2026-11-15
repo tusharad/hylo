@@ -23,18 +23,38 @@ module Hylo.PG.Connection
   , executeSql
   , executeSession
   , translateHasqlError
+  , interpolateParams
+  , boundParamValueEncoder
+  , buildParamsEncoder
+  , mkPreparedStatement
+  , mkPreparedQueryStatement
+  , assembleRowBytes
+  , decodeRowWithCodec
+  , executePreparedQuery
   )
 where
 
 import Control.DeepSeq (NFData (..))
-import Data.Maybe (isJust)
+import Control.Monad (replicateM)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Builder as Builder
+import qualified Data.ByteString.Lazy as BSL
+import Data.Char (isDigit)
+import Data.Functor.Contravariant (contramap)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Hasql.Connection as C
 import qualified Hasql.Connection.Setting as S
 import qualified Hasql.Connection.Setting.Connection as SC
+import qualified Hasql.Decoders as Dec
+import qualified Hasql.Encoders as Enc
 import qualified Hasql.Session as Sess
+import qualified Hasql.Statement as Stmt
+import Hylo.Core.Codec (RowCodec, runBinaryDecoder)
 import Hylo.Core.Transaction
   ( BoundParam (..)
   , Tx (..)
@@ -47,6 +67,7 @@ import Hylo.Core.Transaction
   )
 import Hylo.PG.Transaction.Hooks (executeCommitHooks, executeRollbackHooks)
 import Hylo.SQL.Builder (formatParamValue)
+import Text.Read (readMaybe)
 
 -- | PostgreSQL connection pool descriptor.
 data Pool = Pool
@@ -164,16 +185,14 @@ runTxAttempt (Pool _ _ (Just conn)) beginSql st0 tx = do
     runOps [] = pure (Right ())
     runOps (op : rest) = case op of
       OpMutate (sqlText, params) -> do
-        let stmtSql = interpolateParams sqlText params
-        res <- Sess.run (Sess.sql (TE.encodeUtf8 stmtSql)) conn
+        res <- executeOp sqlText params
         case res of
-          Left qErr -> pure (Left (translateHasqlError qErr))
+          Left err -> pure (Left err)
           Right () -> runOps rest
       OpQuery (sqlText, params) -> do
-        let stmtSql = interpolateParams sqlText params
-        res <- Sess.run (Sess.sql (TE.encodeUtf8 stmtSql)) conn
+        res <- executeOp sqlText params
         case res of
-          Left qErr -> pure (Left (translateHasqlError qErr))
+          Left err -> pure (Left err)
           Right () -> runOps rest
       OpSavepoint _ name -> do
         res <- Sess.run (Sess.sql (TE.encodeUtf8 ("SAVEPOINT \"" <> name <> "\";"))) conn
@@ -190,16 +209,130 @@ runTxAttempt (Pool _ _ (Just conn)) beginSql st0 tx = do
         case res of
           Left qErr -> pure (Left (translateHasqlError qErr))
           Right () -> runOps rest
+    executeOp sqlText params
+      | null params && T.isInfixOf ";" (T.dropEnd 1 (T.stripEnd sqlText)) = do
+          res <- Sess.run (Sess.sql (TE.encodeUtf8 sqlText)) conn
+          pure (either (Left . translateHasqlError) Right res)
+      | otherwise = do
+          let stmt = mkPreparedStatement (TE.encodeUtf8 sqlText) params
+          res <- Sess.run (Sess.statement params stmt) conn
+          pure (either (Left . translateHasqlError) Right res)
 runTxAttempt (Pool _ _ Nothing) _ st0 tx =
   pure (executeTx tx st0)
 
--- | Substitute bound parameters into SQL with proper quote escaping.
+-- | Substitute bound parameters into SQL using single-pass tokenization without recursion or digit prefix collision.
 interpolateParams :: Text -> [BoundParam] -> Text
 interpolateParams sql [] = sql
-interpolateParams sql params = foldl substPostgres sql params
+interpolateParams sql params = go sql
   where
-    substPostgres acc (BoundParam idx val pType) =
-      T.replace ("$" <> T.pack (show idx)) (formatParamValue val pType) acc
+    paramMap = Map.fromList [(paramIndex p, formatParamValue (paramValue p) (paramType p)) | p <- params]
+    go t = case T.break (== '$') t of
+      (before, rest)
+        | T.null rest -> before
+        | otherwise ->
+            let afterDollar = T.drop 1 rest
+                (digits, remaining) = T.span isDigit afterDollar
+             in if T.null digits
+                  then before <> "$" <> go afterDollar
+                  else case readMaybe (T.unpack digits) of
+                    Just idx
+                      | Just formatted <- Map.lookup idx paramMap ->
+                          before <> formatted <> go remaining
+                    _ -> before <> "$" <> digits <> go remaining
+
+-- | Value encoder for a single bound parameter based on its inferred logical/SQL type.
+boundParamValueEncoder :: Text -> Enc.Value Text
+boundParamValueEncoder pType = case pType of
+  "integer" -> contramap parseOrZero Enc.int4
+  "int4" -> contramap parseOrZero Enc.int4
+  "bigint" -> contramap parseOrZero Enc.int8
+  "int8" -> contramap parseOrZero Enc.int8
+  "smallint" -> contramap parseOrZero Enc.int2
+  "int2" -> contramap parseOrZero Enc.int2
+  "boolean" -> contramap (\t -> t == "true" || t == "TRUE" || t == "t") Enc.bool
+  "bool" -> contramap (\t -> t == "true" || t == "TRUE" || t == "t") Enc.bool
+  "double precision" -> contramap parseOrZero Enc.float8
+  "float8" -> contramap parseOrZero Enc.float8
+  "numeric" -> contramap parseOrZero Enc.float8
+  "real" -> contramap parseOrZero Enc.float4
+  "float4" -> contramap parseOrZero Enc.float4
+  "bytea" -> contramap TE.encodeUtf8 Enc.bytea
+  "unknown" -> contramap TE.encodeUtf8 Enc.unknown
+  _ -> Enc.text
+  where
+    parseOrZero :: (Num a, Read a) => Text -> a
+    parseOrZero = fromMaybe 0 . readMaybe . T.unpack
+
+-- | Construct a Hasql parameter encoder for a dynamic list of bound parameters.
+buildParamsEncoder :: [BoundParam] -> Enc.Params [BoundParam]
+buildParamsEncoder ps =
+  mconcat
+    [ contramap
+        (\xs -> if i < length xs then paramValue (xs !! i) else "")
+        (Enc.param (Enc.nonNullable (boundParamValueEncoder (paramType p))))
+    | (i, p) <- zip [0 ..] ps
+    ]
+
+-- | Build a prepared Hasql statement sending [BoundParam] and discarding results.
+mkPreparedStatement :: ByteString -> [BoundParam] -> Stmt.Statement [BoundParam] ()
+mkPreparedStatement sqlBS ps =
+  Stmt.Statement sqlBS (buildParamsEncoder ps) Dec.noResult True
+
+-- | Decode a single column as raw nullable bytes.
+rawColumnDecoder :: Dec.Row (Maybe ByteString)
+rawColumnDecoder = Dec.column (Dec.nullable (Dec.custom (\_ bs -> Right bs)))
+
+-- | Assemble raw PostgreSQL wire column payloads into a framed binary row byte string.
+assembleRowBytes :: [Maybe ByteString] -> ByteString
+assembleRowBytes cols =
+  BSL.toStrict
+    $ Builder.toLazyByteString
+    $ mconcat
+      [ case mbs of
+          Nothing -> Builder.int32BE (-1)
+          Just bs -> Builder.int32BE (fromIntegral (BS.length bs)) <> Builder.byteString bs
+      | mbs <- cols
+      ]
+
+-- | Decode a row from PostgreSQL wire column values using a 'RowCodec'.
+decodeRowWithCodec :: RowCodec r a -> Int -> Dec.Row a
+decodeRowWithCodec codec numCols = do
+  cols <- replicateM numCols rawColumnDecoder
+  let rowBytes = assembleRowBytes cols
+  case runBinaryDecoder codec rowBytes of
+    Left err -> fail (T.unpack err)
+    Right val -> pure val
+
+-- | Build a prepared Hasql statement sending [BoundParam] and decoding result rows via 'RowCodec'.
+mkPreparedQueryStatement ::
+  ByteString ->
+  [BoundParam] ->
+  RowCodec r a ->
+  Int ->
+  Stmt.Statement [BoundParam] [a]
+mkPreparedQueryStatement sqlBS params codec numCols =
+  Stmt.Statement
+    sqlBS
+    (buildParamsEncoder params)
+    (Dec.rowList (decodeRowWithCodec codec numCols))
+    True
+
+-- | Execute a prepared query against PostgreSQL connection pool and hydrate domain rows.
+executePreparedQuery ::
+  Pool ->
+  Text ->
+  [BoundParam] ->
+  RowCodec r a ->
+  Int ->
+  IO (Either TxError [a])
+executePreparedQuery (Pool _ _ (Just conn)) sqlText params codec numCols = do
+  let stmt = mkPreparedQueryStatement (TE.encodeUtf8 sqlText) params codec numCols
+  res <- Sess.run (Sess.statement params stmt) conn
+  case res of
+    Left qErr -> pure (Left (translateHasqlError qErr))
+    Right rows -> pure (Right rows)
+executePreparedQuery (Pool _ _ Nothing) _ _ _ _ =
+  pure (Left (TxUserError "executePreparedQuery: no active PostgreSQL connection in pool"))
 
 -- | Execute a raw SQL statement against the pool's active connection.
 executeSql :: Pool -> Text -> IO (Either TxError ())

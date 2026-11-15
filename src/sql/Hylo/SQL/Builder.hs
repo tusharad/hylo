@@ -61,6 +61,7 @@ module Hylo.SQL.Builder
   , previewQuery
   , previewQueryForDialect
   , formatParamValue
+  , interpolateMarker
   ) where
 
 import Control.DeepSeq (NFData (..))
@@ -99,6 +100,7 @@ import Hylo.SQL.AST
   , renderLockClause
   )
 import Hylo.SQL.Compiler.JoinFlattener (flattenJoins)
+import Text.Read (readMaybe)
 
 --------------------------------------------------------------------------------
 -- 1. Dialects & Backend Markers
@@ -740,21 +742,36 @@ previewQuery (CompiledQuery sql params) =
         [] -> sql
         _ ->
           if T.isInfixOf "$1" sql
-            then foldl substPostgres sql paramList
+            then interpolateMarker '$' sql paramList
             else
               if T.isInfixOf "?1" sql
-                then foldl substSqlite sql paramList
+                then interpolateMarker '?' sql paramList
                 else replaceQMarks sql (map (\(BoundParam _ val pType) -> formatParamValue val pType) paramList)
   where
-    substPostgres acc (BoundParam idx val pType) =
-      T.replace ("$" <> T.pack (show idx)) (formatParamValue val pType) acc
-    substSqlite acc (BoundParam idx val pType) =
-      T.replace ("?" <> T.pack (show idx)) (formatParamValue val pType) acc
     replaceQMarks text [] = text
     replaceQMarks text (val : vs) = case T.breakOn "?" text of
       (before, after)
         | T.null after -> before
         | otherwise -> before <> val <> replaceQMarks (T.drop 1 after) vs
+
+-- | Single-pass tokenization substituting marker digits ($1..$N or ?1..?N) with bound parameters.
+interpolateMarker :: Char -> Text -> [BoundParam] -> Text
+interpolateMarker marker sql params = go sql
+  where
+    paramMap = Map.fromList [(paramIndex p, formatParamValue (paramValue p) (paramType p)) | p <- params]
+    go t = case T.break (== marker) t of
+      (before, rest)
+        | T.null rest -> before
+        | otherwise ->
+            let afterMarker = T.drop 1 rest
+                (digits, remaining) = T.span isDigit afterMarker
+             in if T.null digits
+                  then before <> T.singleton marker <> go afterMarker
+                  else case readMaybe (T.unpack digits) of
+                    Just idx
+                      | Just formatted <- Map.lookup idx paramMap ->
+                          before <> formatted <> go remaining
+                    _ -> before <> T.singleton marker <> digits <> go remaining
 
 -- | Generate a preview SQL string explicitly specifying the dialect.
 previewQueryForDialect :: Dialect -> CompiledQuery -> Text

@@ -69,6 +69,7 @@ module Hylo.Core
 
     -- * Transactions & Failure
   , TxMode (..)
+  , KnownTxMode (..)
   , Tx (..)
   , TxError (..)
   , TxOp (..)
@@ -82,6 +83,10 @@ module Hylo.Core
   , runTxPure
   , onCommit
   , onRollback
+  , registerCursorData
+  , getCursorData
+  , takeCursorRows
+  , removeCursorData
   , FieldError (..)
   , fieldError
 

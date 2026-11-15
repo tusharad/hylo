@@ -245,6 +245,7 @@ test-suite hylo-test
       Hylo.PG.Compiler.JoinFlattenerSpec
       Hylo.PG.Compiler.LateralSpec
       Hylo.PG.Compiler.WindowSpec
+      Hylo.PG.ConnectionSpec
       Hylo.PG.Mutation.BulkSpec
       Hylo.PG.Mutation.ChangesetSpec
       Hylo.PG.Mutation.UpsertSpec

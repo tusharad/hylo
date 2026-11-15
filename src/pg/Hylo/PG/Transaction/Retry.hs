@@ -52,9 +52,11 @@ module Hylo.PG.Transaction.Retry
 import Control.Concurrent (threadDelay)
 import Control.DeepSeq (NFData (..))
 import Control.Monad (when)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Hylo.Core.Transaction
-  ( Tx (..)
+  ( KnownTxMode (..)
+  , Tx (..)
   , TxError (..)
   , TxMode (..)
   , TxState (..)
@@ -153,7 +155,8 @@ If the transaction succeeds, all accumulated 'onCommit' hooks run strictly once.
 If retries are exhausted or a non-retryable error occurs, accumulated 'onRollback' hooks run.
 -}
 runTxWithRetry ::
-  forall k (db :: k) mode a.
+  forall k (db :: k) (mode :: TxMode) a.
+  KnownTxMode mode =>
   RetryPolicy ->
   Pool ->
   IsolationLevel ->
@@ -161,7 +164,8 @@ runTxWithRetry ::
   IO (Either TxError a)
 runTxWithRetry policy targetPool iso tx = loop 0
   where
-    beginSql = renderBeginTransaction iso ReadWrite <> ";"
+    modeVal = txModeVal (Proxy :: Proxy mode)
+    beginSql = renderBeginTransaction iso modeVal <> ";"
     loop :: Int -> IO (Either TxError a)
     loop attempt = do
       let st0 = initialTxState {txAttempt = attempt}
