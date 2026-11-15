@@ -68,22 +68,25 @@ import qualified Data.ByteString as BS
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Hylo.Backend.Capability (Postgres)
 import Hylo.Core.Changeset
   ( Changeset (..)
   , FieldError (..)
   )
-import Hylo.Core.Context (ColDef (..), Ctx (..))
+import Hylo.Core.Context (Ctx (..))
+import Hylo.Core.Query
+  ( findPrimaryKeyCol
+  , renderInsertChangesetSQL
+  , renderUpdateChangesetSQL
+  )
 import Hylo.Core.Table
   ( PatchVal (..)
   , Table (..)
   , TableSchema (..)
   )
 import Hylo.Core.Transaction
-  ( BoundParam (..)
-  , Tx (..)
+  ( Tx (..)
   , TxError (..)
   , TxOp (..)
   , TxState (..)
@@ -102,11 +105,6 @@ import Hylo.PG.Error.Translation
   ( DbError (..)
   , mockSqlStateErrorFull
   , translateChangesetDbError
-  )
-import Hylo.SQL.Builder
-  ( Dialect (PostgresDialect)
-  , inferParamType
-  , quoteIdentifier
   )
 
 --------------------------------------------------------------------------------
@@ -147,118 +145,7 @@ decodeReturningRow ::
 decodeReturningRow = runBinaryDecoder
 
 --------------------------------------------------------------------------------
--- 3. Primary Key Resolution
---------------------------------------------------------------------------------
-
--- | Discover the primary key column name for a schema. Defaults to "id" if not found.
-findPrimaryKeyCol :: (Table table) => TableSchema table -> Text
-findPrimaryKeyCol schema =
-  case [colName c | c <- tableColDefs (tableMeta schema), colIsPrimaryKey c] of
-    (pk : _) -> pk
-    [] -> "id"
-
---------------------------------------------------------------------------------
--- 4. Parameterized SQL Generation
---------------------------------------------------------------------------------
-
-{- | Render a parameterized UPDATE SQL statement setting only modified fields.
-
-Omits 'Unchanged' fields entirely. Binds parameters for 'SetTo' values and emits
-'DEFAULT' for 'SetDefault'. Appends the primary key predicate and ends with 'RETURNING *'.
-Uses table metadata (colName) without GHC.Generics.
--}
-renderUpdateChangesetSQL ::
-  forall table op.
-  (Table table) =>
-  TableSchema table ->
-  Changeset table op ->
-  (Text, [BoundParam])
-renderUpdateChangesetSQL schema cs =
-  let tbl = quoteIdentifier PostgresDialect (tableName schema)
-      pkCol = findPrimaryKeyCol schema
-      entries = patchEntries (tableMeta schema) (changesetPatch cs)
-      -- Exclude primary key from SET clause (it belongs in WHERE clause)
-      setEntries = filter (\(c, _) -> colName c /= pkCol) entries
-      pkVal =
-        if changesetKey cs /= "" && changesetKey cs /= tableName schema
-          then changesetKey cs
-          else case [v | (c, ValSetTo v) <- entries, colName c == pkCol] of
-            (v : _) -> v
-            [] -> "1"
-
-      -- Fold SET entries with monotonically increasing parameter index
-      buildSetClauses [] idx = ([], [], idx)
-      buildSetClauses ((colDef, val) : rest) idx =
-        let qCol = quoteIdentifier PostgresDialect (colName colDef)
-         in case val of
-              ValSetTo valText ->
-                let clause = qCol <> " = $" <> T.pack (show idx)
-                    param = BoundParam idx valText (inferParamType valText)
-                    (restClauses, restParams, finalIdx) = buildSetClauses rest (idx + 1)
-                 in (clause : restClauses, param : restParams, finalIdx)
-              ValSetDefault ->
-                let clause = qCol <> " = DEFAULT"
-                    (restClauses, restParams, finalIdx) = buildSetClauses rest idx
-                 in (clause : restClauses, restParams, finalIdx)
-
-      (setClauses, setParams, nextIdx) = buildSetClauses setEntries 1
-      qPkCol = quoteIdentifier PostgresDialect pkCol
-      whereClause = " WHERE " <> qPkCol <> " = $" <> T.pack (show nextIdx)
-      pkParam = BoundParam nextIdx pkVal "integer"
-      allParams = setParams ++ [pkParam]
-
-      sql = case setClauses of
-        [] ->
-          "UPDATE " <> tbl <> " SET " <> qPkCol <> " = " <> qPkCol <> whereClause <> " RETURNING *"
-        _ ->
-          "UPDATE " <> tbl <> " SET " <> T.intercalate ", " setClauses <> whereClause <> " RETURNING *"
-   in (sql, allParams)
-
-{- | Render a parameterized INSERT SQL statement for non-Unchanged fields.
-
-Binds parameters for 'SetTo' values and emits 'DEFAULT' for 'SetDefault'.
-Ends with 'RETURNING *'. Uses table metadata (colName) without GHC.Generics.
--}
-renderInsertChangesetSQL ::
-  forall table op.
-  (Table table) =>
-  TableSchema table ->
-  Changeset table op ->
-  (Text, [BoundParam])
-renderInsertChangesetSQL schema cs =
-  let tbl = quoteIdentifier PostgresDialect (tableName schema)
-      entries = patchEntries (tableMeta schema) (changesetPatch cs)
-
-      buildInsertClauses [] _ = ([], [], [])
-      buildInsertClauses ((colDef, val) : rest) idx =
-        let qCol = quoteIdentifier PostgresDialect (colName colDef)
-         in case val of
-              ValSetTo valText ->
-                let valExpr = "$" <> T.pack (show idx)
-                    param = BoundParam idx valText (inferParamType valText)
-                    (restCols, restVals, restParams) = buildInsertClauses rest (idx + 1)
-                 in (qCol : restCols, valExpr : restVals, param : restParams)
-              ValSetDefault ->
-                let valExpr = "DEFAULT"
-                    (restCols, restVals, restParams) = buildInsertClauses rest idx
-                 in (qCol : restCols, valExpr : restVals, restParams)
-
-      (cols, vals, params) = buildInsertClauses entries 1
-
-      sql = case cols of
-        [] -> "INSERT INTO " <> tbl <> " DEFAULT VALUES RETURNING *"
-        _ ->
-          "INSERT INTO "
-            <> tbl
-            <> " ("
-            <> T.intercalate ", " cols
-            <> ") VALUES ("
-            <> T.intercalate ", " vals
-            <> ") RETURNING *"
-   in (sql, params)
-
---------------------------------------------------------------------------------
--- 5. Transactional Changeset Mutations
+-- 3. Transactional Changeset Mutations
 --------------------------------------------------------------------------------
 
 {- | Statically guarded parameterized INSERT using the canonical 'TableCodec'.

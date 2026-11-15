@@ -35,11 +35,12 @@ import Hylo.Core.Context
   , Ctx (..)
   , PatchField (..)
   )
-import Hylo.Core.Key (Id (..))
+import Hylo.Core.Key (Id (..), toId)
 import Hylo.Core.Query
   ( Changeset (..)
   , OpKind (..)
   , Postgres
+  , delete
   , emptyChangeset
   , insert
   , withUniqueKey
@@ -49,12 +50,16 @@ import Hylo.Core.Table
   , TableSchema (..)
   , colSpecExpr
   , column
+  , eraseColDef
+  , patchEntry
   , primaryKey
   , tableSchema
   )
 import Hylo.Core.Transaction
-  ( Tx (..)
+  ( BoundParam (..)
+  , Tx (..)
   , TxMode (..)
+  , TxOp (..)
   , TxState (..)
   , executeTx
   , initialTxState
@@ -74,8 +79,10 @@ import Hylo.PG.Mutation.Bulk
   , bulkInsertParamCount
   , chunkList
   , chunkedInsertMany
+  , formatPgArrayElement
   , insertMany
   , insertMany_
+  , renderBulkInsertChangesets
   , renderBulkInsertSQL
   )
 import Hylo.SQL.AST (renderExpr)
@@ -109,6 +116,15 @@ instance Table DocumentT where
     , (colName m.title, colSqlType m.title)
     , (colName m.createdAt, colSqlType m.createdAt)
     ]
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.title
+    , eraseColDef m.createdAt
+    ]
+  patchEntries m p =
+    patchEntry m.id p.id
+      ++ patchEntry m.title p.title
+      ++ patchEntry m.createdAt p.createdAt
 
 instance BulkInsertable DocumentT
 
@@ -155,6 +171,15 @@ instance Table UserT where
     , (colName m.email, colSqlType m.email)
     , (colName m.name, colSqlType m.name)
     ]
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.email
+    , eraseColDef m.name
+    ]
+  patchEntries m p =
+    patchEntry m.id p.id
+      ++ patchEntry m.email p.email
+      ++ patchEntry m.name p.name
 
 instance BulkInsertable UserT
 
@@ -165,6 +190,44 @@ userTable =
       { id = primaryKey "id" "bigint"
       , email = column "email" "text"
       , name = column "name" "text"
+      }
+
+-- | 2-column HKD Table for User Story 16 acceptance test.
+data SimpleUserT (ctx :: Ctx) = SimpleUser
+  { id :: !(Col ctx (Id SimpleUserT Int64))
+  , email :: !(Col ctx Text)
+  }
+
+instance Table SimpleUserT where
+  toTableExpr alias m =
+    SimpleUser
+      { id = colSpecExpr alias m.id
+      , email = colSpecExpr alias m.email
+      }
+  tableExprColumns u =
+    [ renderExpr u.id
+    , renderExpr u.email
+    ]
+  tableColumnsMeta m =
+    [ (colName m.id, colSqlType m.id)
+    , (colName m.email, colSqlType m.email)
+    ]
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.email
+    ]
+  patchEntries m p =
+    patchEntry m.id p.id
+      ++ patchEntry m.email p.email
+
+instance BulkInsertable SimpleUserT
+
+userSchema :: TableSchema SimpleUserT
+userSchema =
+  tableSchema "users" $
+    SimpleUser
+      { id = primaryKey "id" "integer"
+      , email = column "email" "text"
       }
 
 -- | Helper to create a document changeset with a specific key.
@@ -349,3 +412,78 @@ spec = describe "Epic 14: Bulk UNNEST Ingestion & Constraint Translation" $ do
       extractColumnFromConstraint "products" "products_price_check" `shouldBe` "price"
       extractColumnFromConstraint "accounts" "accounts_slug_unique" `shouldBe` "slug"
       extractColumnFromConstraint "orders" "status_check" `shouldBe` "status"
+
+  describe
+    "User Story 16: Real Columnar Parameter Binding in Bulk.insertMany & Parameterized Mutations"
+    $ do
+      it
+        "Acceptance Criterion 1: Calling insertMany with 3 changesets on a 2-column table records an OpMutate with 2 array BoundParams (each containing 3 elements)"
+        $ do
+          let cs1 =
+                withUniqueKey "u1" $
+                  emptyChangeset SimpleUser {id = SetTo (toId 1), email = SetTo "alice@example.com"}
+              cs2 =
+                withUniqueKey "u2" $
+                  emptyChangeset SimpleUser {id = SetTo (toId 2), email = SetTo "bob@example.com"}
+              cs3 =
+                withUniqueKey "u3" $
+                  emptyChangeset SimpleUser {id = SetTo (toId 3), email = SetTo "charlie@example.com"}
+              tx = insertMany userSchema [cs1, cs2, cs3] :: Tx Postgres 'ReadWrite [SimpleUserT 'Result]
+              (res, st) = executeTx tx initialTxState
+          isRight res `shouldBe` True
+          case txOperations st of
+            [OpMutate (sql, params)] -> do
+              T.unpack sql
+                `shouldContain` "INSERT INTO \"users\" (\"id\", \"email\") SELECT * FROM UNNEST($1::integer[], $2::text[])"
+              length params `shouldBe` 2
+              params
+                `shouldBe` [ BoundParam 1 "{1,2,3}" "integer[]"
+                           , BoundParam 2 "{alice@example.com,bob@example.com,charlie@example.com}" "text[]"
+                           ]
+            ops ->
+              expectationFailure
+                ("Expected [OpMutate (sql, params)], but got: " ++ show (length ops) ++ " operations")
+
+      it
+        "Acceptance Criterion 2: Calling delete userSchema (toId 42) records OpMutate (\"DELETE FROM \\\"users\\\" WHERE \\\"id\\\" = $1\", [BoundParam 1 \"42\" \"integer\"])"
+        $ do
+          let tx = delete userSchema (toId 42) :: Tx Postgres 'ReadWrite ()
+              (res, st) = executeTx tx initialTxState
+          isRight res `shouldBe` True
+          txOperations st
+            `shouldBe` [OpMutate ("DELETE FROM \"users\" WHERE \"id\" = $1", [BoundParam 1 "42" "integer"])]
+
+      it "formats special characters in array elements correctly (quotes, spaces, commas)" $ do
+        let cs1 =
+              withUniqueKey "d1" $
+                emptyChangeset
+                  Document
+                    { id = SetTo (toId 1)
+                    , title = SetTo "Doc, with comma"
+                    , createdAt = SetTo "2026-01-01 00:00:00Z"
+                    }
+            cs2 =
+              withUniqueKey "d2" $
+                emptyChangeset
+                  Document
+                    { id = SetTo (toId 2)
+                    , title = SetTo "Doc \"quoted\""
+                    , createdAt = SetTo "2026-01-02 00:00:00Z"
+                    }
+            (sql, params) = renderBulkInsertChangesets docTable [cs1, cs2]
+        T.unpack sql `shouldContain` "SELECT * FROM UNNEST"
+        length params `shouldBe` 3
+        case params of
+          [p1, p2, p3] -> do
+            paramValue p1 `shouldBe` "{1,2}"
+            paramValue p2 `shouldBe` "{\"Doc, with comma\",\"Doc \\\"quoted\\\"\"}"
+            paramType p2 `shouldBe` "text[]"
+            paramType p3 `shouldBe` "timestamptz[]"
+          _ -> expectationFailure "Expected 3 params"
+
+      it "formats individual array elements via formatPgArrayElement" $ do
+        formatPgArrayElement "hello" `shouldBe` "hello"
+        formatPgArrayElement "hello, world" `shouldBe` "\"hello, world\""
+        formatPgArrayElement "quote\"test" `shouldBe` "\"quote\\\"test\""
+        formatPgArrayElement "" `shouldBe` "\"\""
+        formatPgArrayElement "NULL" `shouldBe` "NULL"

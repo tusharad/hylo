@@ -70,6 +70,17 @@ instance Table UserT where
     [ renderExpr u.id
     , renderExpr u.email
     ]
+  tableColumnsMeta m =
+    [ (colName m.id, colSqlType m.id)
+    , (colName m.email, colSqlType m.email)
+    ]
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.email
+    ]
+  patchEntries m p =
+    patchEntry m.id p.id
+      ++ patchEntry m.email p.email
 
 instance Projectable (UserT 'Expr) where
   projectColumns = tableExprColumns

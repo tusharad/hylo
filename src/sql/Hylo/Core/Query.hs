@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
@@ -70,11 +71,17 @@ module Hylo.Core.Query
     -- * Changeset Abstraction
   , module Hylo.Core.Changeset
 
+    -- * Parameterized Mutation SQL Generation
+  , findPrimaryKeyCol
+  , renderInsertChangesetSQL
+  , renderUpdateChangesetSQL
+
     -- * Statically Guarded Mutations
   , select
   , insert
   , update
   , delete
+  , deleteById
 
     -- * Cross-Backend Dialect Renderers
   , compileStandardSQL
@@ -92,6 +99,7 @@ import Data.Int (Int64)
 import Data.Proxy (Proxy (..))
 import Data.Sequence (Seq)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Hylo.Backend.Capability
   ( MySQL
   , PGVersion (..)
@@ -105,7 +113,7 @@ import Hylo.Core.Changeset
   , emptyChangeset
   , withUniqueKey
   )
-import Hylo.Core.Context (Ctx (..))
+import Hylo.Core.Context (ColDef (..), Ctx (..))
 import Hylo.Core.Expr
 import Hylo.Core.Key (Id)
 import Hylo.Core.Nullable
@@ -127,9 +135,14 @@ import Hylo.Core.Query.Monad
   , where_
   )
 import Hylo.Core.Query.Pagination
-import Hylo.Core.Table (TableSchema (..))
+import Hylo.Core.Table
+  ( PatchVal (..)
+  , Table (..)
+  , TableSchema (..)
+  , ToFieldValue (..)
+  )
 import Hylo.Core.Transaction
-import Hylo.Core.TypeError (AssertWritable (..))
+import Hylo.Core.TypeError (AssertWritable (..), writableDict)
 import Hylo.SQL.AST
   ( FromItem (..)
   , LockClause (..)
@@ -148,7 +161,9 @@ import Hylo.SQL.Builder
   ( CompiledQuery (..)
   , Dialect (..)
   , compileQuery
+  , inferParamType
   , previewQuery
+  , quoteIdentifier
   )
 import Hylo.SQL.Query.Aggregate
 import Hylo.SQL.Query.Recursive
@@ -160,10 +175,121 @@ select q = TxAction $ \st ->
   let (res, _qState) = runQuery q initialQueryState
    in (Right res, st)
 
+--------------------------------------------------------------------------------
+-- Parameterized Mutation SQL Generation
+--------------------------------------------------------------------------------
+
+-- | Discover the primary key column name for a schema. Defaults to "id" if not found.
+findPrimaryKeyCol :: (Table table) => TableSchema table -> Text
+findPrimaryKeyCol schema =
+  case [colName c | c <- tableColDefs (tableMeta schema), colIsPrimaryKey c] of
+    (pk : _) -> pk
+    [] -> "id"
+
+{- | Render a parameterized UPDATE SQL statement setting only modified fields.
+
+Omits 'Unchanged' fields entirely. Binds parameters for 'SetTo' values and emits
+'DEFAULT' for 'SetDefault'. Appends the primary key predicate and ends with 'RETURNING *'.
+Uses table metadata (colName) without GHC.Generics.
+-}
+renderUpdateChangesetSQL ::
+  forall table op.
+  (Table table) =>
+  TableSchema table ->
+  Changeset table op ->
+  (Text, [BoundParam])
+renderUpdateChangesetSQL schema cs =
+  let tbl = quoteIdentifier PostgresDialect (tableName schema)
+      pkCol = findPrimaryKeyCol schema
+      entries = patchEntries (tableMeta schema) (changesetPatch cs)
+      -- Exclude primary key from SET clause (it belongs in WHERE clause)
+      setEntries = filter (\(c, _) -> colName c /= pkCol) entries
+      pkVal =
+        if changesetKey cs /= "" && changesetKey cs /= tableName schema
+          then changesetKey cs
+          else case [v | (c, ValSetTo v) <- entries, colName c == pkCol] of
+            (v : _) -> v
+            [] -> "1"
+
+      -- Fold SET entries with monotonically increasing parameter index
+      buildSetClauses [] idx = ([], [], idx)
+      buildSetClauses ((colDef, val) : rest) idx =
+        let qCol = quoteIdentifier PostgresDialect (colName colDef)
+         in case val of
+              ValSetTo valText ->
+                let clause = qCol <> " = $" <> T.pack (show idx)
+                    param = BoundParam idx valText (inferParamType valText)
+                    (restClauses, restParams, finalIdx) = buildSetClauses rest (idx + 1)
+                 in (clause : restClauses, param : restParams, finalIdx)
+              ValSetDefault ->
+                let clause = qCol <> " = DEFAULT"
+                    (restClauses, restParams, finalIdx) = buildSetClauses rest idx
+                 in (clause : restClauses, restParams, finalIdx)
+
+      (setClauses, setParams, nextIdx) = buildSetClauses setEntries 1
+      qPkCol = quoteIdentifier PostgresDialect pkCol
+      whereClause = " WHERE " <> qPkCol <> " = $" <> T.pack (show nextIdx)
+      pkParam = BoundParam nextIdx pkVal "integer"
+      allParams = setParams ++ [pkParam]
+
+      sql = case setClauses of
+        [] ->
+          "UPDATE " <> tbl <> " SET " <> qPkCol <> " = " <> qPkCol <> whereClause <> " RETURNING *"
+        _ ->
+          "UPDATE " <> tbl <> " SET " <> T.intercalate ", " setClauses <> whereClause <> " RETURNING *"
+   in (sql, allParams)
+
+{- | Render a parameterized INSERT SQL statement for non-Unchanged fields.
+
+Binds parameters for 'SetTo' values and emits 'DEFAULT' for 'SetDefault'.
+Ends with 'RETURNING *'. Uses table metadata (colName) without GHC.Generics.
+-}
+renderInsertChangesetSQL ::
+  forall table op.
+  (Table table) =>
+  TableSchema table ->
+  Changeset table op ->
+  (Text, [BoundParam])
+renderInsertChangesetSQL schema cs =
+  let tbl = quoteIdentifier PostgresDialect (tableName schema)
+      entries = patchEntries (tableMeta schema) (changesetPatch cs)
+
+      buildInsertClauses [] _ = ([], [], [])
+      buildInsertClauses ((colDef, val) : rest) idx =
+        let qCol = quoteIdentifier PostgresDialect (colName colDef)
+         in case val of
+              ValSetTo valText ->
+                let valExpr = "$" <> T.pack (show idx)
+                    param = BoundParam idx valText (inferParamType valText)
+                    (restCols, restVals, restParams) = buildInsertClauses rest (idx + 1)
+                 in (qCol : restCols, valExpr : restVals, param : restParams)
+              ValSetDefault ->
+                let valExpr = "DEFAULT"
+                    (restCols, restVals, restParams) = buildInsertClauses rest idx
+                 in (qCol : restCols, valExpr : restVals, restParams)
+
+      (cols, vals, params) = buildInsertClauses entries 1
+
+      sql = case cols of
+        [] -> "INSERT INTO " <> tbl <> " DEFAULT VALUES RETURNING *"
+        _ ->
+          "INSERT INTO "
+            <> tbl
+            <> " ("
+            <> T.intercalate ", " cols
+            <> ") VALUES ("
+            <> T.intercalate ", " vals
+            <> ") RETURNING *"
+   in (sql, params)
+
+--------------------------------------------------------------------------------
+-- Statically Guarded Mutations
+--------------------------------------------------------------------------------
+
 -- | Statically guarded insert operation. Fails with [Hylo Error E005] in ReadOnly mode.
 insert ::
   forall k (db :: k) table (mode :: TxMode) op.
-  (AssertWritable mode) =>
+  (AssertWritable mode, Table table) =>
   TableSchema table ->
   Changeset table op ->
   Tx db mode (table 'Result)
@@ -175,37 +301,58 @@ insert schema cs =
        in if key /= "" && elem (tName, key) (txStore st)
             then (Left (TxConstraintViolation tName "unique_constraint" key), st)
             else
-              let st' =
+              let (sql, params) = renderInsertChangesetSQL schema cs
+                  st' =
                     st
                       { txStore = if key /= "" then (tName, key) : txStore st else txStore st
-                      , txOperations = txOperations st ++ [OpMutate ("INSERT INTO " <> tName, [])]
+                      , txOperations = txOperations st ++ [OpMutate (sql, params)]
                       }
                in (Right (errorWithoutStackTrace "insert: simulated entity hydration"), st')
 
 -- | Statically guarded update operation. Fails with [Hylo Error E005] in ReadOnly mode.
 update ::
   forall k (db :: k) table (mode :: TxMode) op.
-  (AssertWritable mode) =>
+  (AssertWritable mode, Table table) =>
   TableSchema table ->
   Changeset table op ->
   Tx db mode (table 'Result)
-update schema _ =
+update schema cs =
   writableDict (Proxy :: Proxy mode) `seq`
     TxAction $ \st ->
-      let st' = st {txOperations = txOperations st ++ [OpMutate ("UPDATE " <> tableName schema, [])]}
+      let (sql, params) = renderUpdateChangesetSQL schema cs
+          st' = st {txOperations = txOperations st ++ [OpMutate (sql, params)]}
        in (Right (errorWithoutStackTrace "update: simulated entity hydration"), st')
 
 -- | Statically guarded delete operation. Fails with [Hylo Error E005] in ReadOnly mode.
 delete ::
   forall k (db :: k) table (mode :: TxMode).
-  (AssertWritable mode) =>
+  (AssertWritable mode, Table table) =>
   TableSchema table ->
   Id table Int64 ->
   Tx db mode ()
-delete schema _ =
+delete = deleteById
+
+-- | Statically guarded delete operation by key with custom representation.
+deleteById ::
+  forall k (db :: k) table (mode :: TxMode) a.
+  (AssertWritable mode, Table table, ToFieldValue (Id table a)) =>
+  TableSchema table ->
+  Id table a ->
+  Tx db mode ()
+deleteById schema pkId =
   writableDict (Proxy :: Proxy mode) `seq`
     TxAction $ \st ->
-      let st' = st {txOperations = txOperations st ++ [OpMutate ("DELETE FROM " <> tableName schema, [])]}
+      let tName = quoteIdentifier PostgresDialect (tableName schema)
+          pkVal = toFieldValue pkId
+          (pkCol, pkType) = case [(colName c, colSqlType c) | c <- tableColDefs (tableMeta schema), colIsPrimaryKey c] of
+            ((c, t) : _) ->
+              ( quoteIdentifier PostgresDialect c
+              , if T.null t then inferParamType pkVal else t
+              )
+            [] -> (quoteIdentifier PostgresDialect "id", inferParamType pkVal)
+          sql = "DELETE FROM " <> tName <> " WHERE " <> pkCol <> " = $1"
+          params = [BoundParam 1 pkVal pkType]
+          st' = st {txOperations = txOperations st ++ [OpMutate (sql, params)]}
        in (Right (), st')
 
 --------------------------------------------------------------------------------
