@@ -59,9 +59,9 @@ import Data.Text (Text)
 import GHC.TypeLits (Symbol)
 import Hylo.Core.Expr (QExpr (..), ToQExpr (..))
 import Hylo.Core.Key (Id)
-import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Query.Monad (Query (..), QueryState (..), having)
 import Hylo.Core.TypeError (AssertGrouped (..))
+import Hylo.SQL.AST (Projectable (..), renderExpr)
 
 -- | Phantom context tracking scalar vs grouped query contexts.
 data AggCtx = Scalar | Grouped

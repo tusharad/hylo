@@ -28,6 +28,7 @@ import qualified Hylo.PG.Search.HybridSpec as HybridSpec
 import qualified Hylo.PG.Streaming.CursorSpec as CursorSpec
 import qualified Hylo.PG.Transaction.RetrySpec as RetrySpec
 import qualified Hylo.PG.VectorSpec as VectorSpec
+import qualified Hylo.SQL.BuilderSpec as BuilderSpec
 import Test.Hspec
 
 main :: IO ()
@@ -52,4 +53,5 @@ main = hspec $ do
   DiffSpec.spec
   LinterSpec.spec
   CapabilitySpec.spec
+  BuilderSpec.spec
   RealPostgresSpec.spec

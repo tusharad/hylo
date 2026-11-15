@@ -40,6 +40,7 @@ library hylo-core
   visibility: public
   hs-source-dirs: src/core
   exposed-modules:
+      Hylo.Backend.Capability
       Hylo.Core
       Hylo.Core.Changeset
       Hylo.Core.Codec
@@ -50,6 +51,7 @@ library hylo-core
       Hylo.Core.Nullable
       Hylo.Core.Schema
       Hylo.Core.Table
+      Hylo.Core.Text
       Hylo.Core.Transaction
       Hylo.Core.TypeError
       Hylo.Core.TypeLevel.Nat
@@ -67,16 +69,15 @@ library hylo-sql
   visibility: public
   hs-source-dirs: src/sql
   exposed-modules:
-      Hylo.Backend.Capability
       Hylo.SQL
       Hylo.SQL.AST
+      Hylo.SQL.Builder
       Hylo.SQL.Compiler.JoinFlattener
       Hylo.SQL.Query.Aggregate
       Hylo.SQL.Query.CTE
       Hylo.SQL.Query.Recursive
       Hylo.SQL.Query.Window
       Hylo.Core.Query
-      Hylo.Core.Query.AST
       Hylo.Core.Query.Monad
       Hylo.Core.Query.Pagination
   build-depends:
@@ -86,6 +87,7 @@ library hylo-sql
     , deepseq >=1.4 && <2
     , hylo:hylo-core
     , text >=1.2 && <3
+    , transformers >=0.5 && <0.7
     , vector >=0.12 && <0.14
 
 library hylo-pg
@@ -120,7 +122,7 @@ library hylo-pg
     , bytestring >=0.10 && <0.13
     , containers >=0.6 && <0.8
     , deepseq >=1.4 && <2
-    , hasql >=1.6 && <2
+    , hasql >=1.6 && <1.10
     , hasql-pool >=1.0 && <2
     , hasql-transaction >=1.1 && <2
     , hylo:hylo-core
@@ -168,11 +170,7 @@ library hylo-redis
       Hylo.Redis
   build-depends:
       base >=4.7 && <5
-    , bytestring >=0.10 && <0.13
-    , containers >=0.6 && <0.8
     , hylo:hylo-core
-    , hylo:hylo-sql
-    , text >=1.2 && <3
 
 library
   import: common-options
@@ -196,7 +194,7 @@ library
     , bytestring >=0.10 && <0.13
     , containers >=0.6 && <0.8
     , deepseq >=1.4 && <2
-    , hasql >=1.6 && <2
+    , hasql >=1.6 && <1.10
     , hasql-pool >=1.0 && <2
     , hasql-transaction >=1.1 && <2
     , hylo:hylo-core
@@ -249,6 +247,7 @@ test-suite hylo-test
       Hylo.PG.Streaming.CursorSpec
       Hylo.PG.Transaction.RetrySpec
       Hylo.PG.VectorSpec
+      Hylo.SQL.BuilderSpec
       Hylo.Test.Docker
       Hylo.Test.ShouldNotTypecheck
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
@@ -260,7 +259,7 @@ test-suite hylo-test
     , bytestring >=0.10 && <0.13
     , containers >=0.6 && <0.8
     , deepseq >=1.4
-    , hasql >=1.6 && <2
+    , hasql >=1.6 && <1.10
     , hasql-pool >=1.0 && <2
     , hasql-transaction >=1.1 && <2
     , hspec >=2.11

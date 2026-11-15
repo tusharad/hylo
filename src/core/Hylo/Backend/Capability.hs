@@ -4,7 +4,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -19,8 +18,9 @@ License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
 
 Fine-grained single-parameter typeclasses gating advanced database capabilities
-(relational joins, lateral subqueries, window functions, transactions, vector search,
-batch lookup, and recursive CTEs) across PostgreSQL, SQLite, MongoDB, and DynamoDB.
+(relational joins, lateral subqueries, returning clauses, key-value ops, window functions,
+transactions, vector search, batch lookup, and recursive CTEs) across PostgreSQL, MySQL,
+SQLite, Redis, MongoDB, and DynamoDB.
 Unsupported feature usage fails statically at compile time with '[Hylo Error E008]'.
 -}
 module Hylo.Backend.Capability
@@ -51,43 +51,17 @@ module Hylo.Backend.Capability
   , AssertBackendCapability (..)
   , CheckBackendCapability
 
-    -- * Cross-Backend Dialect Renderers
-  , renderPostgresSQL
-  , renderSQLiteSQL
-
     -- * DataLoader Batching Abstraction
   , DataLoaderBatch (..)
   , runBatchLoader
   , viaBatchLoader
-
-    -- * Capability-Guarded CTE Combinators
-  , with
-  , withMaterialized
-  , withRecursive
-  , withRecursiveCycle
   ) where
 
-import Control.DeepSeq (NFData (..))
 import Data.List (nub)
 import qualified Data.Map.Strict as Map
 import Data.Proxy (Proxy (..))
-import Data.Text (Text)
-import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Hylo.Core.Expr (QExpr (..))
-import Hylo.Core.Query.AST
-  ( CycleClause (..)
-  , FromItem (..)
-  , LateralBinding (..)
-  , Materialization (..)
-  , Projectable (..)
-  , renderExpr
-  )
-import Hylo.Core.Query.Monad (Query (..), QueryState (..), initialQueryState)
 import Hylo.Core.TypeError (AssertBackendCapability (..), CheckBackendCapability)
-import Hylo.SQL.Compiler.JoinFlattener (flattenJoins, renderFromItem)
-import Hylo.SQL.Query.CTE (CTERef (..), CTERow (..), renderCTEs)
-import qualified Hylo.SQL.Query.CTE as CTE
 
 --------------------------------------------------------------------------------
 -- 0. Database Backend Markers & Engine Versions
@@ -167,7 +141,7 @@ class SupportsRecursiveCTE db where
 type SupportsRecursiveCTEs = SupportsRecursiveCTE
 
 -- | Backwards-compatibility dictionary method for pluralized capability name.
-recursiveCTEsDict :: forall db. SupportsRecursiveCTE db => Proxy db -> ()
+recursiveCTEsDict :: forall db. (SupportsRecursiveCTE db) => Proxy db -> ()
 recursiveCTEsDict = recursiveCTEDict
 
 --------------------------------------------------------------------------------
@@ -217,7 +191,10 @@ instance SupportsLateralSubqueries Postgres where
 instance SupportsReturningClause Postgres where
   returningClauseDict _ = ()
 
-instance (AssertBackendCapability "Key-Value Operations" "PostgreSQL" 'False) => SupportsKeyValueOps Postgres where
+instance
+  (AssertBackendCapability "Key-Value Operations" "PostgreSQL" 'False) =>
+  SupportsKeyValueOps Postgres
+  where
   keyValueOpsDict _ =
     backendCapabilityDict (Proxy @"Key-Value Operations") (Proxy @"PostgreSQL") (Proxy @'False)
 
@@ -249,11 +226,17 @@ instance SupportsRelationalJoins MySQL where
 instance SupportsLateralSubqueries MySQL where
   lateralSubqueriesDict _ = ()
 
-instance (AssertBackendCapability "Returning Clause" "MySQL" 'False) => SupportsReturningClause MySQL where
+instance
+  (AssertBackendCapability "Returning Clause" "MySQL" 'False) =>
+  SupportsReturningClause MySQL
+  where
   returningClauseDict _ =
     backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"MySQL") (Proxy @'False)
 
-instance (AssertBackendCapability "Key-Value Operations" "MySQL" 'False) => SupportsKeyValueOps MySQL where
+instance
+  (AssertBackendCapability "Key-Value Operations" "MySQL" 'False) =>
+  SupportsKeyValueOps MySQL
+  where
   keyValueOpsDict _ =
     backendCapabilityDict (Proxy @"Key-Value Operations") (Proxy @"MySQL") (Proxy @'False)
 
@@ -285,7 +268,10 @@ instance SupportsLateralSubqueries SQLite where
 instance SupportsReturningClause SQLite where
   returningClauseDict _ = ()
 
-instance (AssertBackendCapability "Key-Value Operations" "SQLite" 'False) => SupportsKeyValueOps SQLite where
+instance
+  (AssertBackendCapability "Key-Value Operations" "SQLite" 'False) =>
+  SupportsKeyValueOps SQLite
+  where
   keyValueOpsDict _ =
     backendCapabilityDict (Proxy @"Key-Value Operations") (Proxy @"SQLite") (Proxy @'False)
 
@@ -295,7 +281,10 @@ instance SupportsWindowFunctions SQLite where
 instance SupportsTransactions SQLite where
   transactionsDict _ = ()
 
-instance (AssertBackendCapability "Vector Search" "SQLite" 'False) => SupportsVectorSearch SQLite where
+instance
+  (AssertBackendCapability "Vector Search" "SQLite" 'False) =>
+  SupportsVectorSearch SQLite
+  where
   vectorSearchDict _ =
     backendCapabilityDict (Proxy @"Vector Search") (Proxy @"SQLite") (Proxy @'False)
 
@@ -315,27 +304,45 @@ instance SupportsRecursiveCTE SQLite where
 instance SupportsKeyValueOps Redis where
   keyValueOpsDict _ = ()
 
-instance (AssertBackendCapability "Relational Joins" "Redis" 'False) => SupportsRelationalJoins Redis where
+instance
+  (AssertBackendCapability "Relational Joins" "Redis" 'False) =>
+  SupportsRelationalJoins Redis
+  where
   relationalJoinsDict _ =
     backendCapabilityDict (Proxy @"Relational Joins") (Proxy @"Redis") (Proxy @'False)
 
-instance (AssertBackendCapability "Lateral Subqueries" "Redis" 'False) => SupportsLateralSubqueries Redis where
+instance
+  (AssertBackendCapability "Lateral Subqueries" "Redis" 'False) =>
+  SupportsLateralSubqueries Redis
+  where
   lateralSubqueriesDict _ =
     backendCapabilityDict (Proxy @"Lateral Subqueries") (Proxy @"Redis") (Proxy @'False)
 
-instance (AssertBackendCapability "Returning Clause" "Redis" 'False) => SupportsReturningClause Redis where
+instance
+  (AssertBackendCapability "Returning Clause" "Redis" 'False) =>
+  SupportsReturningClause Redis
+  where
   returningClauseDict _ =
     backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"Redis") (Proxy @'False)
 
-instance (AssertBackendCapability "Window Functions" "Redis" 'False) => SupportsWindowFunctions Redis where
+instance
+  (AssertBackendCapability "Window Functions" "Redis" 'False) =>
+  SupportsWindowFunctions Redis
+  where
   windowFunctionsDict _ =
     backendCapabilityDict (Proxy @"Window Functions") (Proxy @"Redis") (Proxy @'False)
 
-instance (AssertBackendCapability "CTEs" "Redis" 'False) => SupportsCTE Redis where
+instance
+  (AssertBackendCapability "CTEs" "Redis" 'False) =>
+  SupportsCTE Redis
+  where
   cteDict _ =
     backendCapabilityDict (Proxy @"CTEs") (Proxy @"Redis") (Proxy @'False)
 
-instance (AssertBackendCapability "Recursive CTEs" "Redis" 'False) => SupportsRecursiveCTE Redis where
+instance
+  (AssertBackendCapability "Recursive CTEs" "Redis" 'False) =>
+  SupportsRecursiveCTE Redis
+  where
   recursiveCTEDict _ =
     backendCapabilityDict (Proxy @"Recursive CTEs") (Proxy @"Redis") (Proxy @'False)
 
@@ -343,19 +350,31 @@ instance (AssertBackendCapability "Recursive CTEs" "Redis" 'False) => SupportsRe
 -- 6. Capability Instances: MongoDB
 --------------------------------------------------------------------------------
 
-instance (AssertBackendCapability "Relational Joins" "MongoDB" 'False) => SupportsRelationalJoins MongoDB where
+instance
+  (AssertBackendCapability "Relational Joins" "MongoDB" 'False) =>
+  SupportsRelationalJoins MongoDB
+  where
   relationalJoinsDict _ =
     backendCapabilityDict (Proxy @"Relational Joins") (Proxy @"MongoDB") (Proxy @'False)
 
-instance (AssertBackendCapability "Lateral Subqueries" "MongoDB" 'False) => SupportsLateralSubqueries MongoDB where
+instance
+  (AssertBackendCapability "Lateral Subqueries" "MongoDB" 'False) =>
+  SupportsLateralSubqueries MongoDB
+  where
   lateralSubqueriesDict _ =
     backendCapabilityDict (Proxy @"Lateral Subqueries") (Proxy @"MongoDB") (Proxy @'False)
 
-instance (AssertBackendCapability "Returning Clause" "MongoDB" 'False) => SupportsReturningClause MongoDB where
+instance
+  (AssertBackendCapability "Returning Clause" "MongoDB" 'False) =>
+  SupportsReturningClause MongoDB
+  where
   returningClauseDict _ =
     backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"MongoDB") (Proxy @'False)
 
-instance (AssertBackendCapability "Window Functions" "MongoDB" 'False) => SupportsWindowFunctions MongoDB where
+instance
+  (AssertBackendCapability "Window Functions" "MongoDB" 'False) =>
+  SupportsWindowFunctions MongoDB
+  where
   windowFunctionsDict _ =
     backendCapabilityDict (Proxy @"Window Functions") (Proxy @"MongoDB") (Proxy @'False)
 
@@ -368,11 +387,17 @@ instance SupportsVectorSearch MongoDB where
 instance SupportsBatchLookup MongoDB where
   batchLookupDict _ = ()
 
-instance (AssertBackendCapability "CTEs" "MongoDB" 'False) => SupportsCTE MongoDB where
+instance
+  (AssertBackendCapability "CTEs" "MongoDB" 'False) =>
+  SupportsCTE MongoDB
+  where
   cteDict _ =
     backendCapabilityDict (Proxy @"CTEs") (Proxy @"MongoDB") (Proxy @'False)
 
-instance (AssertBackendCapability "Recursive CTEs" "MongoDB" 'False) => SupportsRecursiveCTE MongoDB where
+instance
+  (AssertBackendCapability "Recursive CTEs" "MongoDB" 'False) =>
+  SupportsRecursiveCTE MongoDB
+  where
   recursiveCTEDict _ =
     backendCapabilityDict (Proxy @"Recursive CTEs") (Proxy @"MongoDB") (Proxy @'False)
 
@@ -380,7 +405,10 @@ instance (AssertBackendCapability "Recursive CTEs" "MongoDB" 'False) => Supports
 -- 7. Capability Instances: DynamoDB
 --------------------------------------------------------------------------------
 
-instance (AssertBackendCapability "Relational Joins" "DynamoDB" 'False) => SupportsRelationalJoins DynamoDB where
+instance
+  (AssertBackendCapability "Relational Joins" "DynamoDB" 'False) =>
+  SupportsRelationalJoins DynamoDB
+  where
   relationalJoinsDict _ =
     backendCapabilityDict (Proxy @"Relational Joins") (Proxy @"DynamoDB") (Proxy @'False)
 
@@ -391,112 +419,49 @@ instance
   lateralSubqueriesDict _ =
     backendCapabilityDict (Proxy @"Lateral Subqueries") (Proxy @"DynamoDB") (Proxy @'False)
 
-instance (AssertBackendCapability "Returning Clause" "DynamoDB" 'False) => SupportsReturningClause DynamoDB where
+instance
+  (AssertBackendCapability "Returning Clause" "DynamoDB" 'False) =>
+  SupportsReturningClause DynamoDB
+  where
   returningClauseDict _ =
     backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"DynamoDB") (Proxy @'False)
 
-instance (AssertBackendCapability "Window Functions" "DynamoDB" 'False) => SupportsWindowFunctions DynamoDB where
+instance
+  (AssertBackendCapability "Window Functions" "DynamoDB" 'False) =>
+  SupportsWindowFunctions DynamoDB
+  where
   windowFunctionsDict _ =
     backendCapabilityDict (Proxy @"Window Functions") (Proxy @"DynamoDB") (Proxy @'False)
 
 instance SupportsTransactions DynamoDB where
   transactionsDict _ = ()
 
-instance (AssertBackendCapability "Vector Search" "DynamoDB" 'False) => SupportsVectorSearch DynamoDB where
+instance
+  (AssertBackendCapability "Vector Search" "DynamoDB" 'False) =>
+  SupportsVectorSearch DynamoDB
+  where
   vectorSearchDict _ =
     backendCapabilityDict (Proxy @"Vector Search") (Proxy @"DynamoDB") (Proxy @'False)
 
 instance SupportsBatchLookup DynamoDB where
   batchLookupDict _ = ()
 
-instance (AssertBackendCapability "CTEs" "DynamoDB" 'False) => SupportsCTE DynamoDB where
+instance
+  (AssertBackendCapability "CTEs" "DynamoDB" 'False) =>
+  SupportsCTE DynamoDB
+  where
   cteDict _ =
     backendCapabilityDict (Proxy @"CTEs") (Proxy @"DynamoDB") (Proxy @'False)
 
-instance (AssertBackendCapability "Recursive CTEs" "DynamoDB" 'False) => SupportsRecursiveCTE DynamoDB where
+instance
+  (AssertBackendCapability "Recursive CTEs" "DynamoDB" 'False) =>
+  SupportsRecursiveCTE DynamoDB
+  where
   recursiveCTEDict _ =
     backendCapabilityDict (Proxy @"Recursive CTEs") (Proxy @"DynamoDB") (Proxy @'False)
 
 --------------------------------------------------------------------------------
--- 6. Cross-Backend Dialect Renderers
---------------------------------------------------------------------------------
-
--- | Generic ANSI SQL query renderer.
-renderStandardSQLText :: Projectable a => Query db a -> Text
-renderStandardSQLText q =
-  let (res, st) = runQuery q initialQueryState
-   in case qsUpsert st of
-        Just upsertSql -> upsertSql
-        Nothing ->
-          case qsCustomQuery st of
-            Just customSql -> customSql
-            Nothing ->
-              let cteClause = renderCTEs (qsCTEs st)
-                  projections = projectColumns res
-                  selectClause =
-                    "SELECT "
-                      <> (if null projections then "1" else T.intercalate ", " projections)
-                  (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
-                  mFromWithLaterals = case mFrom of
-                    Nothing -> case qsLaterals st of
-                      [] -> Nothing
-                      (l : ls) ->
-                        Just $
-                          foldl
-                            (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-                            (FromTable (lbAlias l) (lbAlias l))
-                            ls
-                    Just baseItem ->
-                      Just $
-                        foldl
-                          (\acc (LateralBinding a sql) -> LeftJoinLateral acc sql a)
-                          baseItem
-                          (qsLaterals st)
-                  fromClause = case mFromWithLaterals of
-                    Nothing -> ""
-                    Just item -> " FROM " <> renderFromItem item
-                  whereClause = case wherePreds of
-                    [] -> ""
-                    (p : ps) ->
-                      let combined = foldl (BinOpExpr "AND") p ps
-                       in " WHERE " <> renderExpr combined
-                  groupByClause = case qsGroupBy st of
-                    [] -> ""
-                    cols -> " GROUP BY " <> T.intercalate ", " cols
-                  havingClause = case qsHaving st of
-                    [] -> ""
-                    (h : hs) ->
-                      let combined = foldl (BinOpExpr "AND") h hs
-                       in " HAVING " <> renderExpr combined
-                  orderByClause = case qsOrderBy st of
-                    [] -> ""
-                    orders -> " ORDER BY " <> T.intercalate ", " orders
-                  limitClause = case qsLimit st of
-                    Nothing -> ""
-                    Just n -> " LIMIT " <> T.pack (show n)
-                  offsetClause = case qsOffset st of
-                    Nothing -> ""
-                    Just n -> " OFFSET " <> T.pack (show n)
-               in cteClause
-                    <> selectClause
-                    <> fromClause
-                    <> whereClause
-                    <> groupByClause
-                    <> havingClause
-                    <> orderByClause
-                    <> limitClause
-                    <> offsetClause
-
--- | Render a Query into strict Text SQL representation for PostgreSQL.
-renderPostgresSQL :: Projectable a => Query (Postgres v) a -> Text
-renderPostgresSQL = renderStandardSQLText
-
--- | Render a Query into strict Text SQL representation for SQLite.
-renderSQLiteSQL :: Projectable a => Query SQLite a -> Text
-renderSQLiteSQL = renderStandardSQLText
-
---------------------------------------------------------------------------------
--- 7. DataLoader Batching Abstraction (Law 2)
+-- 8. DataLoader Batching Abstraction
 --------------------------------------------------------------------------------
 
 -- | DataLoader batch execution tracking structure.
@@ -507,8 +472,6 @@ data DataLoaderBatch parent child = DataLoaderBatch
   , batchResults :: ![(parent, [child])]
   }
   deriving (Show, Eq, Generic)
-
-instance (NFData parent, NFData child) => NFData (DataLoaderBatch parent child)
 
 -- | Execute batch loader over parent items and batched child lookup with guaranteed 2 queries.
 runBatchLoader ::
@@ -545,57 +508,3 @@ viaBatchLoader ::
 viaBatchLoader parents getParentKey fetchChildren getChildKey =
   batchLookupDict (Proxy @db) `seq`
     runBatchLoader parents getParentKey fetchChildren getChildKey
-
---------------------------------------------------------------------------------
--- 8. Capability-Guarded CTE Combinators
---------------------------------------------------------------------------------
-
--- | Capability-guarded CTE combinator.
-with ::
-  forall db ret rec final.
-  (SupportsCTE db, CTERow ret rec) =>
-  Text ->
-  Query db ret ->
-  (CTERef rec -> Query db final) ->
-  Query db final
-with name q f =
-  cteDict (Proxy @db) `seq` CTE.with name q f
-
--- | Capability-guarded CTE combinator with materialization fence.
-withMaterialized ::
-  forall db ret rec final.
-  (SupportsCTE db, CTERow ret rec) =>
-  Materialization ->
-  Text ->
-  Query db ret ->
-  (CTERef rec -> Query db final) ->
-  Query db final
-withMaterialized mat name q f =
-  cteDict (Proxy @db) `seq` CTE.withMaterialized mat name q f
-
--- | Capability-guarded recursive CTE combinator.
-withRecursive ::
-  forall db ret rec final.
-  (SupportsRecursiveCTE db, CTERow ret rec) =>
-  Text ->
-  (CTERef rec -> Query db ret) ->
-  (CTERef rec -> Query db ret) ->
-  (CTERef rec -> Query db final) ->
-  Query db final
-withRecursive name baseCase recCase mainQuery =
-  recursiveCTEDict (Proxy @db) `seq`
-    CTE.withRecursive name baseCase recCase mainQuery
-
--- | Capability-guarded recursive CTE combinator with cycle detection clause.
-withRecursiveCycle ::
-  forall db ret rec final.
-  (SupportsRecursiveCTE db, CTERow ret rec) =>
-  Text ->
-  Maybe CycleClause ->
-  (CTERef rec -> Query db ret) ->
-  (CTERef rec -> Query db ret) ->
-  (CTERef rec -> Query db final) ->
-  Query db final
-withRecursiveCycle name mCycle baseCase recCase mainQuery =
-  recursiveCTEDict (Proxy @db) `seq`
-    CTE.withRecursiveCycle name mCycle baseCase recCase mainQuery

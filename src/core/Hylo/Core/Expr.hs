@@ -32,6 +32,8 @@ module Hylo.Core.Expr
   , (<=.)
   , (>.)
   , (>=.)
+  , (&&.)
+  , (||.)
   , AssertComparable
   ) where
 
@@ -222,3 +224,15 @@ infix 4 >.
 (>=.) l r = comparableDict (Proxy :: Proxy a) (Proxy :: Proxy b) `seq` BinOpExpr ">=" (toQExpr l) (toQExpr r)
 
 infix 4 >=.
+
+-- | Logical AND of two boolean expressions.
+(&&.) :: QExpr Bool -> QExpr Bool -> QExpr Bool
+(&&.) = BinOpExpr "AND"
+
+infixr 3 &&.
+
+-- | Logical OR of two boolean expressions.
+(||.) :: QExpr Bool -> QExpr Bool -> QExpr Bool
+(||.) = BinOpExpr "OR"
+
+infixr 2 ||.

@@ -64,8 +64,11 @@ import Hylo.Core.Query
   , offset
   , orderBy
   , renderExpr
+  , renderPostgresSQL
+  , renderSQLiteSQL
   , sum_
   , where_
+  , withRecursive
   )
 import qualified Hylo.MySQL as MySQL
 import qualified Hylo.PG as PG

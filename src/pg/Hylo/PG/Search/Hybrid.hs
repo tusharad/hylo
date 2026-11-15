@@ -63,11 +63,11 @@ import Hylo.Backend.Capability (SQLite)
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query (Postgres, Query (..), QueryState (..))
-import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.Core.TypeError (AssertBackendCapability (..))
 import Hylo.PG.Search.RRF
 import Hylo.PG.Vector
+import Hylo.SQL.AST (Projectable (..), renderExpr)
 
 -- | Backend capability certifying database support for single-trip hybrid search.
 class SupportsHybridSearch db where

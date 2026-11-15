@@ -56,10 +56,10 @@ import qualified Data.Text as T
 import Hylo.Core.Context (ColDef (..), ColSpec, Ctx (..))
 import Hylo.Core.Expr (QExpr (..), ToQExpr (..))
 import Hylo.Core.Query (Tx (..), TxMode (..))
-import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Query.Monad (Query (..), QueryState (..))
 import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.Core.TypeError (AssertWritable (..))
+import Hylo.SQL.AST (Projectable (..), renderExpr)
 
 -- | Conflict target specification for PostgreSQL ON CONFLICT clause.
 data ConflictTarget

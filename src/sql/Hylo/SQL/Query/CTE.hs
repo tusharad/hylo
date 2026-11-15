@@ -53,7 +53,13 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Records (HasField (..))
 import Hylo.Core.Expr (QExpr (..), colExpr)
-import Hylo.Core.Query.AST
+import Hylo.Core.Query.Monad
+  ( FromRelation (..)
+  , Query (..)
+  , QueryState (..)
+  , initialQueryState
+  )
+import Hylo.SQL.AST
   ( CTEBinding (..)
   , CTEType (..)
   , CycleClause (..)
@@ -65,12 +71,6 @@ import Hylo.Core.Query.AST
   , ScopeId (..)
   , formatScope
   , renderExpr
-  )
-import Hylo.Core.Query.Monad
-  ( FromRelation (..)
-  , Query (..)
-  , QueryState (..)
-  , initialQueryState
   )
 import Hylo.SQL.Compiler.JoinFlattener
   ( flattenJoins

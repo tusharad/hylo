@@ -29,7 +29,8 @@ import Control.DeepSeq (NFData (..))
 import Data.Text (Text)
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr)
-import Hylo.Core.Query.AST
+import Hylo.Core.Table (Table (..), TableSchema (..))
+import Hylo.SQL.AST
   ( CTEBinding (..)
   , LateralBinding (..)
   , LockClause (..)
@@ -37,7 +38,6 @@ import Hylo.Core.Query.AST
   , ScopeId (..)
   , formatScope
   )
-import Hylo.Core.Table (Table (..), TableSchema (..))
 
 -- | Internal state tracked during Query monadic composition.
 data QueryState = QueryState

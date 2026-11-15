@@ -18,7 +18,7 @@ module Hylo.PG.Compiler.Aggregate
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..))
-import Hylo.Core.Query.AST (renderExpr)
+import Hylo.SQL.AST (renderExpr)
 import Hylo.SQL.Query.Aggregate (AggExpr (..))
 
 -- | Render an aggregate expression to PostgreSQL SQL text.

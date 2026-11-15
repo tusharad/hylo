@@ -71,8 +71,8 @@ import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..), ToQExpr (..))
-import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Query.Monad (Query (..), QueryState (..))
+import Hylo.SQL.AST (Projectable (..), renderExpr)
 import Hylo.SQL.Query.Aggregate (AggExpr (..))
 
 -- | Order specification with direction and null placement semantics.

@@ -17,7 +17,7 @@ module Hylo.SQL.Compiler.JoinFlattener
 import Data.List (partition)
 import Data.Text (Text)
 import Hylo.Core.Expr (QExpr (..))
-import Hylo.Core.Query.AST
+import Hylo.SQL.AST
   ( FromItem (..)
   , RelationBinding (..)
   , exprAliases

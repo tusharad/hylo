@@ -38,7 +38,6 @@ import Hylo.Core.Context (Col, Ctx (..))
 import Hylo.Core.Expr (lit, (==.))
 import Hylo.Core.Key (Id (..))
 import Hylo.Core.Query (Changeset, OpKind (..), Postgres, insert)
-import Hylo.Core.Query.AST (Projectable (..), renderExpr)
 import Hylo.Core.Table
   ( Table (..)
   , TableSchema (..)
@@ -56,6 +55,7 @@ import Hylo.Core.Transaction
   , initialTxState
   )
 import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.SQL.AST (Projectable (..), renderExpr)
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck

@@ -34,12 +34,14 @@ import Hylo.Backend.Capability
   , SupportsRecursiveCTE (..)
   , SupportsRecursiveCTEs
   , recursiveCTEsDict
-  , with
+  )
+import Hylo.SQL.Query.CTE hiding
+  ( with
   , withMaterialized
   , withRecursive
   , withRecursiveCycle
   )
-import Hylo.SQL.Query.CTE hiding
+import Hylo.SQL.Query.Recursive
   ( with
   , withMaterialized
   , withRecursive
