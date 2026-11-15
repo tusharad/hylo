@@ -310,6 +310,19 @@ All agents and contributors working on this codebase MUST follow this branching 
    Writing `if condition then [elem] else []` in AST visitor or linting functions triggers HLint's suggestion to use list comprehensions `[elem | condition]`.
    * **Rule:** Use list comprehensions `[elem | condition]` for concise, idiomatic conditional error collection in AST linting engines.
 
+57. **`AllowAmbiguousTypes` for Polymorphic Capability Combinators (`viaBatchLoader @db`):**
+   When defining polymorphic query or capability combinators (such as `viaBatchLoader :: forall db parent key child ...`) where the database backend type variable `db` appears only in a class constraint (`SupportsBatchLookup db`) and not in the function's arguments or return type, GHC rejects the declaration or call sites with `[GHC-39999] Could not deduce SupportsBatchLookup db0 ... type variable db0 is ambiguous`.
+   * **Rule:** Enable `{-# LANGUAGE AllowAmbiguousTypes #-}` on modules defining combinators that instantiate typeclass constraints via visible type applications (`@db` / `@DynamoDB`), and declare `forall db ...` explicitly in the signature.
+
+58. **Monomorphic `Text` Return Types for Dialect SQL Renderers in Test Assertions:**
+   When backend renderers (`renderPostgresSQL`, `renderSQLiteSQL`) are typed with polymorphic string return types `(Projectable a, IsString s) => ... -> s`, comparing them in tests via `pgSQL `shouldBe` sqliteSQL` causes GHC to fail with `[GHC-39999] Ambiguous type variable a0 arising from use of 'shouldBe'`. Because neither side of `shouldBe` is a concrete literal or type-annotated value, GHC cannot resolve the polymorphic type variable `s`.
+   * **Rule:** SQL renderers (`renderPostgresSQL`, `renderSQLiteSQL`) should return concrete `Data.Text.Text`. This eliminates ambiguous type variable errors at test assertion sites with zero manual type annotations.
+
+59. **Avoiding Multiline Chained Dollar (`$`) Syntax Across Fourmolu Versions:**
+   Writing multiline chained `$` applications across nested data constructors (e.g. `Just $ ProjectStage $ object $ ...`) produces different indentation layouts between Fourmolu 0.21.x (local environment) and Fourmolu 0.17.x (GitHub Actions CI runner), causing CI format checks to fail.
+   * **Rule:** Avoid multiline chained `$` operators across nested constructor invocations. Use standard function application with explicit parentheses or `let` bindings (`let projectFields = ... in Just (ProjectStage (object projectFields))`) to guarantee 100% byte-for-byte formatting idempotence across all Fourmolu toolchain versions.
+
+
 
 
 
