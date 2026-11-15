@@ -292,6 +292,16 @@ All agents and contributors working on this codebase MUST follow this branching 
    When building AST state conditionally based on optional fields (e.g. `queryLimit :: Maybe Int`), writing `for_ (queryLimit q) $ \l -> modify ...` triggers HLint's suggestion to use `case` matching or `whenJust`.
    * **Rule:** Use explicit pattern matching `case queryLimit q of Just l -> modify ...; Nothing -> pure ()` or `whenJust` rather than `for_` over `Maybe` in monadic AST manipulation functions to avoid HLint warnings under `--pedantic`.
 
+53. **Topological Symmetries in Reversible Catalog Inversion (`invertDiff`):**
+   When `computeCatalogDiff` sorts added tables topologically (`sortTablesByDependencies added`) and dropped tables in reverse topological order (`reverse (sortTablesByDependencies dropped)`), simply swapping the lists in `invertDiff` reverses the expected topological order. To preserve the group action symmetry `invertDiff (computeCatalogDiff s1 s2) == computeCatalogDiff s2 s1`, `invertDiff` must reverse both swapped lists:
+   `cdAddedTables (invertDiff diff) = reverse (cdDroppedTables diff)`
+   `cdDroppedTables (invertDiff diff) = reverse (cdAddedTables diff)`
+   * **Rule:** Always account for order inversion when diffing topologically sorted structures to maintain strict algebraic group action properties under bidirectional inversion.
+
+54. **Parenthesizing Nested Type Constructors in HKD Codegen (`(Nullable (Embedding ...))`):**
+   When generating Haskell source code for parameterized type constructors (such as `Embedding "default" 1536`), wrapping them in outer type constructors (such as `Nullable`) without explicit parentheses yields `Nullable Embedding "default" 1536`, which fails GHC's type checker (treating `Nullable` as a 3-argument type constructor).
+   * **Rule:** When synthesizing Haskell types in metaprogramming or reverse codegen, any composite type containing spaces must be parenthesized before being wrapped in an outer type constructor: `(Nullable (Embedding "default" 1536))`.
+
 
 
 
