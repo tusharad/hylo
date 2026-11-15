@@ -46,9 +46,30 @@ jobs:
       run:
         shell: bash
 
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hylo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hylo_test
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client libraries
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev
 
       - name: Install dependencies, build, and run test suite
         uses: freckle/stack-action@v5
