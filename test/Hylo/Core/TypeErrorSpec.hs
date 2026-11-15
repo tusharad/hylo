@@ -55,8 +55,8 @@ import Hylo.Core.TypeError
   , AssertSafeMigration (..)
   , AssertValidForeignKey (..)
   )
+import Hylo.Test.ShouldNotTypecheck
 import Test.Hspec
-import Test.ShouldNotTypecheck
 
 -- | Test Table A: Document entity
 data DocumentT (ctx :: Ctx) = Document

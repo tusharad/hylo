@@ -71,9 +71,9 @@ import Hylo.Core.Query.Window
   , (&)
   )
 import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.Test.ShouldNotTypecheck
 import Test.Hspec
 import Test.QuickCheck
-import Test.ShouldNotTypecheck
 
 -- | Test Table: Transaction entity with account reference, amount, and timestamp.
 data TransactionT (ctx :: Ctx) = Transaction

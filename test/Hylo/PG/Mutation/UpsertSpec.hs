@@ -38,9 +38,9 @@ import Hylo.Core.Query
 import Hylo.PG.Compiler.SQL (renderSQL)
 import Hylo.PG.Mutation.Locking
 import Hylo.PG.Mutation.Upsert
+import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
-import Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 
 default (Text, Int64, Double)
 

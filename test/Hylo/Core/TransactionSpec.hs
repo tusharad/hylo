@@ -33,15 +33,12 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core
 import Hylo.Core.Query
-  ( TxError (..)
-  , TxOp (..)
-  , TxState (..)
-  , executeTx
-  , initialTxState
+  ( Postgres
+  , Projectable (..)
+  , each
+  , insert
+  , renderExpr
   , select
-  , txFail
-  , withSavepoint
-  , withUniqueKey
   )
 import Hylo.PG.Connection (pool, runTx)
 import Hylo.PG.Transaction.Savepoint
@@ -50,9 +47,9 @@ import Hylo.PG.Transaction.Savepoint
   , renderRollbackSavepoint
   , renderSavepoint
   )
+import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
-import Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 
 default (Text, Int64, Double)
 

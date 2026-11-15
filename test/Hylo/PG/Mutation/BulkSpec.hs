@@ -78,9 +78,9 @@ import Hylo.PG.Mutation.Bulk
   , insertMany_
   , renderBulkInsertSQL
   )
+import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
-import Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 
 default (Text, Int64, Double)
 

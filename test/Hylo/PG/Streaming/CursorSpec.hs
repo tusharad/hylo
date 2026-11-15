@@ -33,10 +33,12 @@ import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Hylo.Core
 import Hylo.Core.Query
-  ( desc
+  ( Projectable (..)
+  , desc
+  , each
   , limit
   , orderBy
-  , runTxPure
+  , renderExpr
   )
 import Hylo.Core.Query.Pagination
   ( SeekDirection (..)

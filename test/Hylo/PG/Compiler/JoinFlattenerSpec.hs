@@ -39,7 +39,6 @@ import Hylo.Core
   , foreignKey
   , lit
   , primaryKey
-  , runQuery
   , tableSchema
   , (==.)
   )
@@ -47,6 +46,7 @@ import Hylo.Core.Query
   ( each
   , generateScopes
   , initialQueryState
+  , runQuery
   , where_
   )
 import Hylo.PG.Compiler.SQL (renderSQL)

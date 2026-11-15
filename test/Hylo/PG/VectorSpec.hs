@@ -50,9 +50,9 @@ import Hylo.PG.Vector
   , (<->)
   , (<=>)
   )
+import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
-import Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 
 default (Text, Int64, Double)
 
