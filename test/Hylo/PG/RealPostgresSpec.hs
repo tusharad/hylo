@@ -1,8 +1,13 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
 {- |
@@ -16,6 +21,7 @@ module Hylo.PG.RealPostgresSpec (spec) where
 
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as BSL
+import Data.Int (Int64)
 import Data.Ratio ((%))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -31,12 +37,31 @@ import Data.Time.Format.ISO8601 (iso8601Show)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Data.Vector as Vector
+import GHC.Generics (Generic)
 import qualified Hasql.Decoders as Dec
 import qualified Hasql.Encoders as Enc
 import qualified Hasql.Session as Sess
 import qualified Hasql.Statement as Stmt
 import Hylo.Backend.Capability (PGVersion (..), Postgres)
+import Hylo.Core
+  ( Col
+  , Ctx (..)
+  , Id (..)
+  , PatchField (..)
+  , Table (..)
+  , TableSchema (..)
+  , colSpecExpr
+  , column
+  , diffField
+  , eraseColDef
+  , patchEntry
+  , primaryKey
+  , tableSchema
+  )
+import Hylo.Core.Changeset (OpKind (..), change)
 import Hylo.Core.Codec (Codec (..), field)
+import Hylo.Core.Expr (lit, (==.))
+import Hylo.Core.Query (each, where_)
 import Hylo.Core.Transaction
   ( BoundParam (..)
   , Tx (..)
@@ -48,9 +73,13 @@ import Hylo.Core.Transaction
   )
 import Hylo.Core.TypeError (TxMode (..))
 import Hylo.PG.Codec.Binary
-  ( dayCodec
+  ( boolCodec
+  , dayCodec
   , embeddingCodec
+  , idCodec
+  , int64Codec
   , jsonbCodec
+  , textCodec
   , utcTimeCodec
   , uuidCodec
   )
@@ -60,6 +89,16 @@ import Hylo.PG.Connection
   , executeSession
   , executeSql
   , runTx
+  , selectRows
+  , selectRowsTx
+  , selectRowsTxWith
+  )
+import Hylo.PG.Mutation.Changeset
+  ( ChangesetError (..)
+  , TableCodec (..)
+  , insertChangesetWithFallback
+  , runInsertChangesetIO
+  , runUpdateChangesetIO
   )
 import Hylo.PG.Transaction.Retry
   ( IsolationLevel (..)
@@ -68,6 +107,7 @@ import Hylo.PG.Transaction.Retry
   , simulateWriteConflictOnce
   )
 import Hylo.PG.Vector (Embedding (..), renderVectorText)
+import Hylo.SQL.AST (Projectable (..), renderExpr)
 import Hylo.Test.Docker (getTestPgVersion, withTestPostgres)
 import Test.Hspec
 
@@ -485,6 +525,84 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
                   }
               ]
 
+  it
+    "User Story 14 Acceptance Criterion: executes selectRows, insertChangeset, and updateChangeset against live PostgreSQL with real row hydration"
+    $ withTestPostgres
+    $ \p -> do
+      case poolActiveConnection p of
+        Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
+        Just _ -> do
+          _ <-
+            executeSql
+              p
+              "DROP TABLE IF EXISTS test_live_accounts CASCADE; \
+              \CREATE TABLE test_live_accounts ( \
+              \  id BIGSERIAL PRIMARY KEY, \
+              \  name TEXT NOT NULL, \
+              \  email TEXT NOT NULL, \
+              \  score BIGINT NOT NULL, \
+              \  active BOOLEAN NOT NULL \
+              \);"
+
+          -- 1. Insert a record via Changeset (no wireBytes mocks, no errorWithoutStackTrace)
+          let newAccount = Account (Id 1) "Alice" "alice@example.com" 100 True
+              csInsert = change @'InsertOp (diffTable (Account (Id 0) "" "" 0 False) newAccount)
+          insertRes <- runInsertChangesetIO p accountSchema csInsert
+          insertRes `shouldBe` Right (Account (Id 1) "Alice" "alice@example.com" 100 True)
+
+          -- 2. Update a field via a partial Changeset
+          let patchUpdate =
+                Account
+                  { id = SetTo (Id 1)
+                  , name = Unchanged
+                  , email = SetTo "alice_updated@example.com"
+                  , score = SetTo 250
+                  , active = Unchanged
+                  }
+              csUpdate = change @'UpdateOp patchUpdate
+          updateRes <- runUpdateChangesetIO p accountSchema csUpdate
+          updateRes `shouldBe` Right (Account (Id 1) "Alice" "alice_updated@example.com" 250 True)
+
+          -- 3. Query it back via selectRows (receiving the exact hydrated Haskell struct from PostgreSQL)
+          let q = do
+                a <- each accountSchema
+                where_ (a.id ==. lit (Id 1 :: Id AccountT Int64))
+                pure a
+          rowsRes <- selectRows p q
+          rowsRes `shouldBe` Right [Account (Id 1) "Alice" "alice_updated@example.com" 250 True]
+
+          -- 4. Transaction-aware counterpart recording OpQuery in Tx
+          let txSelect = selectRowsTx q :: Tx (Postgres 'PG17) 'ReadOnly [Account]
+          txRes <- runTx p ReadOnly txSelect
+          txRes `shouldBe` Right []
+
+          let txSelectWithFallback = selectRowsTxWith [Account (Id 1) "Alice" "alice_updated@example.com" 250 True] q
+          txRes2 <- runTx p ReadOnly txSelectWithFallback
+          txRes2 `shouldBe` Right [Account (Id 1) "Alice" "alice_updated@example.com" 250 True]
+
+          -- 5. Statically guarded Tx mutation with RETURNING * executing through executeOp without protocol mismatch
+          let patch2 =
+                Account
+                  { id = SetTo (Id 2)
+                  , name = SetTo "Bob"
+                  , email = SetTo "bob@example.com"
+                  , score = SetTo 50
+                  , active = SetTo True
+                  }
+              csInsert2 = change @'InsertOp patch2
+              txInsert :: Tx (Postgres 'PG17) 'ReadWrite (Either ChangesetError Account)
+              txInsert =
+                insertChangesetWithFallback accountSchema (Account (Id 2) "Bob" "bob@example.com" 50 True) csInsert2
+          resTxInsert <- runTx p ReadWrite txInsert
+          resTxInsert `shouldBe` Right (Right (Account (Id 2) "Bob" "bob@example.com" 50 True))
+
+          let q2 = do
+                a <- each accountSchema
+                where_ (a.id ==. lit (Id 2 :: Id AccountT Int64))
+                pure a
+          rows2 <- selectRows p q2
+          rows2 `shouldBe` Right [Account (Id 2) "Bob" "bob@example.com" 50 True]
+
 -- -----------------------------------------------------------------------------
 -- User Story 12 Test Row Type & Codec
 -- -----------------------------------------------------------------------------
@@ -508,3 +626,89 @@ binaryRowCodec =
     <*> field (.d) dayCodec
     <*> field (.j) jsonbCodec
     <*> field (.v) embeddingCodec
+
+-- -----------------------------------------------------------------------------
+-- User Story 14 Test Table & Codec
+-- -----------------------------------------------------------------------------
+
+data AccountT (ctx :: Ctx) = Account
+  { id :: !(Col ctx (Id AccountT Int64))
+  , name :: !(Col ctx Text)
+  , email :: !(Col ctx Text)
+  , score :: !(Col ctx Int64)
+  , active :: !(Col ctx Bool)
+  }
+  deriving (Generic)
+
+deriving instance Eq (AccountT 'Result)
+deriving instance Show (AccountT 'Result)
+deriving instance Eq (AccountT 'Patch)
+deriving instance Show (AccountT 'Patch)
+
+type Account = AccountT 'Result
+
+accountSchema :: TableSchema AccountT
+accountSchema =
+  tableSchema "test_live_accounts" $
+    Account
+      { id = primaryKey "id" "bigint"
+      , name = column "name" "text"
+      , email = column "email" "text"
+      , score = column "score" "bigint"
+      , active = column "active" "boolean"
+      }
+
+instance Table AccountT where
+  toTableExpr alias meta =
+    Account
+      { id = colSpecExpr alias meta.id
+      , name = colSpecExpr alias meta.name
+      , email = colSpecExpr alias meta.email
+      , score = colSpecExpr alias meta.score
+      , active = colSpecExpr alias meta.active
+      }
+  diffTable old new =
+    Account
+      { id = diffField old.id new.id
+      , name = diffField old.name new.name
+      , email = diffField old.email new.email
+      , score = diffField old.score new.score
+      , active = diffField old.active new.active
+      }
+  tableExprColumns a =
+    [ renderExpr a.id
+    , renderExpr a.name
+    , renderExpr a.email
+    , renderExpr a.score
+    , renderExpr a.active
+    ]
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.name
+    , eraseColDef m.email
+    , eraseColDef m.score
+    , eraseColDef m.active
+    ]
+  patchEntries meta patch =
+    concat
+      [ patchEntry meta.id patch.id
+      , patchEntry meta.name patch.name
+      , patchEntry meta.email patch.email
+      , patchEntry meta.score patch.score
+      , patchEntry meta.active patch.active
+      ]
+
+instance Projectable (AccountT 'Expr) where
+  projectColumns = tableExprColumns
+
+accountCodec :: Codec Account Account
+accountCodec =
+  Account
+    <$> field (.id) (idCodec int64Codec)
+    <*> field (.name) textCodec
+    <*> field (.email) textCodec
+    <*> field (.score) int64Codec
+    <*> field (.active) boolCodec
+
+instance TableCodec AccountT where
+  tableCodec = accountCodec

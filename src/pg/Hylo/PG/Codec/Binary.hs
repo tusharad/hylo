@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
@@ -47,6 +48,9 @@ module Hylo.PG.Codec.Binary
   , embeddingCodec
   , arrayCodec
   , arrayCodecWithOid
+
+    -- * Table Codec
+  , TableCodec (..)
 
     -- * Specification Composite Codec
   , compositeCodec
@@ -101,6 +105,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Lazy as BSL
 import Data.Int (Int16, Int32, Int64)
+import Data.Kind (Type)
 import Data.Ratio ((%))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -146,6 +151,7 @@ import Hylo.Core.Codec
   , runBinaryEncoder
   , tripleCodec
   )
+import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Key (Id)
 import Hylo.PG.Vector (Embedding (..), decodeBinaryVector, encodeBinaryVector)
 
@@ -508,6 +514,14 @@ arrayCol = arrayCodec
 
 idCol :: ValueCodec a -> ValueCodec (Id table a)
 idCol = idCodec
+
+--------------------------------------------------------------------------------
+-- Table Codec
+--------------------------------------------------------------------------------
+
+-- | Typeclass associating an HKD table with its canonical binary wire RowCodec.
+class TableCodec (table :: Ctx -> Type) where
+  tableCodec :: RowCodec (table 'Result) (table 'Result)
 
 --------------------------------------------------------------------------------
 -- Specification Composite Codec
