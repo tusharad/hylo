@@ -63,7 +63,7 @@ module Hylo.Core
   , AssertSafeMigration (..)
   , CheckSafeMigration
 
-    -- * Transactions, Failure & Changesets
+    -- * Transactions & Failure
   , TxMode (..)
   , Tx (..)
   , TxError (..)
@@ -76,10 +76,51 @@ module Hylo.Core
   , runTxPure
   , onCommit
   , onRollback
+  , FieldError (..)
+  , fieldError
+
+    -- * Changesets, Validation & Diffing
+  , OpKind (..)
   , Changeset (..)
   , emptyChangeset
+  , change
   , withUniqueKey
-  , FieldError (..)
+  , castChangesetOp
+  , ConstraintDeclaration (..)
+  , constraintField
+  , constraintName
+  , constraintMessage
+  , constraintRefTable
+  , uniqueConstraint
+  , uniqueConstraintNamed
+  , foreignKeyConstraint
+  , foreignKeyConstraintNamed
+  , addError
+  , addFieldError
+  , validateRequired
+  , CheckRequired (..)
+  , validateLength
+  , LengthOpts (..)
+  , hasMinLength
+  , hasMaxLength
+  , hasLengthRange
+  , hasExactLength
+  , validateFormat
+  , validateFormatWith
+  , validateNumber
+  , NumberOpts (..)
+  , greaterThan
+  , greaterThanOrEqualTo
+  , lessThan
+  , lessThanOrEqualTo
+  , numberRange
+  , diffRecord
+  , dirtyFields
+  , dirtyFieldMap
+  , changesetDirtyFields
+  , genericDiff
+  , genericDirtyMap
+  , Validation (..)
 
     -- * Automatic Nullability Lifting
   , NullableTable (..)
@@ -121,9 +162,9 @@ module Hylo.Core
   , quadCodec
   ) where
 
+import Hylo.Core.Changeset
 import Hylo.Core.Codec
 import Hylo.Core.Context
-import Hylo.Core.Error
 import Hylo.Core.Expr
 import Hylo.Core.Key
 import Hylo.Core.Nullable

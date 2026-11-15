@@ -41,6 +41,7 @@ library hylo-core
   hs-source-dirs: src/core
   exposed-modules:
       Hylo.Core
+      Hylo.Core.Changeset
       Hylo.Core.Codec
       Hylo.Core.Context
       Hylo.Core.Error
@@ -229,6 +230,7 @@ test-suite hylo-test
   other-modules:
       Hylo.AI.QueryToolSpec
       Hylo.Backend.CapabilitySpec
+      Hylo.Core.ChangesetSpec
       Hylo.Core.CodecSpec
       Hylo.Core.TableSpec
       Hylo.Core.TransactionSpec

@@ -38,6 +38,7 @@ import Hylo.Core.Context
 import Hylo.Core.Key (Id (..))
 import Hylo.Core.Query
   ( Changeset (..)
+  , OpKind (..)
   , Postgres
   , emptyChangeset
   , insert
@@ -120,7 +121,7 @@ docTable =
       , createdAt = column "created_at" "timestamptz"
       }
 
-validDocumentChangeset :: Changeset DocumentT
+validDocumentChangeset :: Changeset DocumentT 'InsertOp
 validDocumentChangeset =
   withUniqueKey "doc-1" $
     emptyChangeset
@@ -167,7 +168,7 @@ userTable =
       }
 
 -- | Helper to create a document changeset with a specific key.
-makeDocChangeset :: Text -> Changeset DocumentT
+makeDocChangeset :: Text -> Changeset DocumentT 'InsertOp
 makeDocChangeset k =
   withUniqueKey k $
     emptyChangeset

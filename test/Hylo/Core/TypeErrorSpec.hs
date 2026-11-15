@@ -35,6 +35,7 @@ import Hylo.Core.Expr (QExpr (..), just, (==.))
 import Hylo.Core.Key (Id (..), toId)
 import Hylo.Core.Query
   ( Changeset (..)
+  , OpKind (..)
   , Postgres
   , Tx (..)
   , TxMode (..)
@@ -93,7 +94,7 @@ docTable =
       , title = column "title" "text"
       }
 
-docChangeset :: Changeset DocumentT
+docChangeset :: Changeset DocumentT 'InsertOp
 docChangeset =
   emptyChangeset $
     Document
