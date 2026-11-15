@@ -28,6 +28,7 @@ module Hylo.PG.Compiler.JoinFlattenerSpec
 import Data.Int (Int64)
 import Data.List (nub)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Hylo.Core
   ( Col
   , Ctx (..)
@@ -37,19 +38,29 @@ import Hylo.Core
   , colSpecExpr
   , column
   , foreignKey
+  , just
   , lit
   , primaryKey
   , tableSchema
   , (==.)
   )
 import Hylo.Core.Query
-  ( each
+  ( asc
+  , desc
+  , each
   , generateScopes
   , initialQueryState
+  , leftJoin
+  , nullsFirst
+  , nullsLast
+  , orderBy
   , runQuery
   , where_
   )
-import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.MySQL.Compiler (compileMySQLQuery)
+import Hylo.PG.Compiler.SQL (compilePostgresQuery, renderSQL)
+import Hylo.SQL.Builder (CompiledQuery (..))
+import Hylo.SQLite.Compiler (compileSQLiteQuery)
 import Test.Hspec
 import Test.QuickCheck
 
@@ -215,3 +226,44 @@ spec = describe "Epic 4: Query Monad AST & Join Flattener" $ do
           sql :: String
           sql = renderSQL q
       sql `shouldContain` "WHERE (\"t0\".\"active\" = TRUE)"
+
+  describe "User Story 15: leftJoin & orderBy in Query Monad" $ do
+    it
+      "projects columns through NullableTable as QExpr (Maybe a) and compiles to LEFT JOIN in Postgres, MySQL, and SQLite"
+      $ do
+        let q = do
+              u <- each userTable
+              p <- leftJoin profileTable (\prof -> prof.userId ==. just u.id)
+              pure (u.email, p.bio)
+            pgSql = T.unpack (compiledSQL (compilePostgresQuery q))
+            mySql = T.unpack (compiledSQL (compileMySQLQuery q))
+            sqSql = T.unpack (compiledSQL (compileSQLiteQuery q))
+        pgSql
+          `shouldContain` "FROM \"users\" AS \"t0\" LEFT JOIN \"profiles\" AS \"t1\" ON (\"t1\".\"user_id\" = \"t0\".\"id\")"
+        mySql
+          `shouldContain` "FROM `users` AS `t0` LEFT JOIN `profiles` AS `t1` ON (`t1`.`user_id` = `t0`.`id`)"
+        sqSql
+          `shouldContain` "FROM \"users\" AS \"t0\" LEFT JOIN \"profiles\" AS \"t1\" ON (\"t1\".\"user_id\" = \"t0\".\"id\")"
+
+    it "supports orderBy with asc, desc, nullsFirst, and nullsLast across dialects" $ do
+      let q = do
+            u <- each userTable
+            where_ (u.active ==. lit True)
+            orderBy [desc u.email, nullsLast (asc u.id)]
+            pure u.email
+          pgSql = T.unpack (compiledSQL (compilePostgresQuery q))
+          mySql = T.unpack (compiledSQL (compileMySQLQuery q))
+      pgSql `shouldContain` "ORDER BY \"t0\".\"email\" DESC, \"t0\".\"id\" ASC NULLS LAST"
+      mySql `shouldContain` "ORDER BY `t0`.`email` DESC, `t0`.`id` ASC NULLS LAST"
+
+    it "combines leftJoin with WHERE filters and orderBy seamlessly" $ do
+      let q = do
+            u <- each userTable
+            p <- leftJoin profileTable (\prof -> prof.userId ==. just u.id)
+            where_ (u.active ==. lit True)
+            orderBy [nullsFirst (desc p.bio)]
+            pure (u.email, p.bio)
+          pgSql = T.unpack (compiledSQL (compilePostgresQuery q))
+      pgSql `shouldContain` "LEFT JOIN \"profiles\" AS \"t1\" ON (\"t1\".\"user_id\" = \"t0\".\"id\")"
+      pgSql `shouldContain` "WHERE (\"t0\".\"active\" = TRUE)"
+      pgSql `shouldContain` "ORDER BY \"t1\".\"bio\" DESC NULLS FIRST"

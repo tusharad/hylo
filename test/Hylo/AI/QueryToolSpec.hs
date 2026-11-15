@@ -172,6 +172,31 @@ spec = describe "Epic 17: Sandboxed Structured Agent Query Compiler" $ do
           preview `shouldContain` "(\"t0\".\"title\" = 'Spec')"
         Left err -> expectationFailure ("Unexpected error: " ++ show err)
 
+    it "User Story 15: applies orderBy on whitelisted column emitting ORDER BY clause" $ do
+      let payload = [json| { "orderBy": "title:desc" } |]
+          policy = defaultPolicy {allowedFilterCols = ["title", "createdAt"]}
+          sql = compileSQL docTable policy payload
+      sql `shouldContain` "ORDER BY \"t0\".\"title\" DESC"
+
+    it "User Story 15: supports orderBy with ascending direction" $ do
+      let payload = [json| { "orderBy": "title:asc" } |]
+          policy = defaultPolicy {allowedFilterCols = ["title", "createdAt"]}
+          sql = compileSQL docTable policy payload
+      sql `shouldContain` "ORDER BY \"t0\".\"title\" ASC"
+
+    it "User Story 15: rejects orderBy referencing un-whitelisted columns" $ do
+      let payload = [json| { "orderBy": "salary:desc" } |]
+          policy = defaultPolicy {allowedFilterCols = ["title", "createdAt"]}
+          result = compileAgentQuery docTable policy payload
+      result `shouldBe` Left (ForbiddenColumnError "salary")
+
+    it "User Story 15: combines filter and orderBy seamlessly" $ do
+      let payload = [json| { "filter": { "title": { "$eq": "Spec" } }, "orderBy": "created_at:desc" } |]
+          policy = defaultPolicy {allowedFilterCols = ["title", "created_at"]}
+          sql = compileSQL docTable policy payload
+      sql `shouldContain` "(\"t0\".\"title\" = 'Spec')"
+      sql `shouldContain` "ORDER BY \"t0\".\"created_at\" DESC"
+
   describe "Contract Elicitation: Formal Laws" $ do
     it "Law 1: Mandatory Scope Conjunction Invariant (Filter(execute) == Filter(LLM) AND Scope)" $ do
       property $ \(Positive (orgVal :: Int64)) (titleVal :: String) -> do

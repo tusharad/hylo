@@ -67,9 +67,9 @@ import Hylo.SQL.AST
   , LateralBinding (..)
   , Materialization (..)
   , Projectable (..)
-  , RelationBinding (..)
   , ScopeId (..)
   , formatScope
+  , mkRelationBinding
   , renderExpr
   )
 import Hylo.SQL.Compiler.JoinFlattener
@@ -94,7 +94,7 @@ instance FromRelation (CTERef record) record where
         tName = cteRefName cte
         alias = formatScope tName scope
         exprRecord = cteRefMkRecord cte alias
-        binding = RelationBinding tName scope alias
+        binding = mkRelationBinding tName scope alias
         s' =
           s
             { qsNextScope = qsNextScope s + 1

@@ -17,6 +17,8 @@ module Hylo.SQL.AST
   , formatScope
   , generateScopes
   , RelationBinding (..)
+  , mkRelationBinding
+  , mkLeftJoinBinding
   , LateralBinding (..)
   , Materialization (..)
   , CycleClause (..)
@@ -38,6 +40,7 @@ import Control.DeepSeq (NFData (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..))
+import Hylo.Core.Nullable (NullableTable (..))
 import Hylo.Core.Transaction (BoundParam (..))
 
 instance NFData (QExpr a) where
@@ -77,11 +80,20 @@ data RelationBinding = RelationBinding
   { rbTableName :: !Text
   , rbScope :: !ScopeId
   , rbAlias :: !Text
+  , rbLeftJoinCond :: !(Maybe (QExpr Bool))
   }
   deriving (Eq, Show)
 
 instance NFData RelationBinding where
-  rnf (RelationBinding t s a) = rnf t `seq` rnf s `seq` rnf a
+  rnf (RelationBinding t s a c) = rnf t `seq` rnf s `seq` rnf a `seq` rnf c
+
+-- | Construct a standard FROM relation binding.
+mkRelationBinding :: Text -> ScopeId -> Text -> RelationBinding
+mkRelationBinding t s a = RelationBinding t s a Nothing
+
+-- | Construct a LEFT JOIN relation binding with an ON predicate.
+mkLeftJoinBinding :: Text -> ScopeId -> Text -> QExpr Bool -> RelationBinding
+mkLeftJoinBinding t s a c = RelationBinding t s a (Just c)
 
 -- | Internal binding descriptor tracking a correlated lateral subquery.
 data LateralBinding = LateralBinding
@@ -297,6 +309,9 @@ class Projectable a where
 
 instance Projectable () where
   projectColumns () = ["1"]
+
+instance Projectable a => Projectable (NullableTable a) where
+  projectColumns (NullableTable a) = projectColumns a
 
 instance Projectable (QExpr a) where
   projectColumns e = [renderExpr e]

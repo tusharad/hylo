@@ -1,10 +1,13 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeOperators #-}
 
 {- |
 Module      : Hylo.Core.Query.Monad
@@ -23,12 +26,25 @@ module Hylo.Core.Query.Monad
   , having
   , limit
   , offset
+  , leftJoin
+  , OrderBy (..)
+  , OrderSpec (..)
+  , OrderDirection (..)
+  , NullsOrder (..)
+  , asc
+  , desc
+  , nullsFirst
+  , nullsLast
+  , renderOrderSpec
+  , unOrderSpec
   ) where
 
 import Control.DeepSeq (NFData (..))
 import Data.Text (Text)
+import GHC.Generics (Generic)
 import Hylo.Core.Context (Ctx (..))
-import Hylo.Core.Expr (QExpr)
+import Hylo.Core.Expr (QExpr, ToQExpr (..))
+import Hylo.Core.Nullable (NullableTable (..))
 import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.SQL.AST
   ( QueryState (..)
@@ -36,6 +52,8 @@ import Hylo.SQL.AST
   , ScopeId (..)
   , formatScope
   , initialQueryState
+  , mkRelationBinding
+  , renderExpr
   )
 
 -- | Pure operational Query monad parameterised by database backend marker.
@@ -78,13 +96,34 @@ eachWith mkExpr schema = Query $ \s ->
       tName = tableName schema
       alias = formatScope tName scope
       exprRecord = mkExpr alias (tableMeta schema)
-      binding = RelationBinding tName scope alias
+      binding = mkRelationBinding tName scope alias
       s' =
         s
           { qsNextScope = qsNextScope s + 1
           , qsRelations = qsRelations s ++ [binding]
           }
    in (exprRecord, s')
+
+-- | Bind a database table via LEFT JOIN with a typed ON condition.
+leftJoin ::
+  Table table =>
+  TableSchema table ->
+  (NullableTable (table 'Expr) -> QExpr Bool) ->
+  Query db (NullableTable (table 'Expr))
+leftJoin schema onCondFn = Query $ \s ->
+  let scope = ScopeId (qsNextScope s)
+      tName = tableName schema
+      alias = formatScope tName scope
+      exprRecord = toTableExpr alias (tableMeta schema)
+      nullableRec = NullableTable exprRecord
+      onCond = onCondFn nullableRec
+      binding = RelationBinding tName scope alias (Just onCond)
+      s' =
+        s
+          { qsNextScope = qsNextScope s + 1
+          , qsRelations = qsRelations s ++ [binding]
+          }
+   in (nullableRec, s')
 
 -- | Append a filter constraint to the active Query context.
 where_ :: QExpr Bool -> Query db ()
@@ -109,3 +148,67 @@ offset :: Int -> Query db ()
 offset n = Query $ \s ->
   let s' = s {qsOffset = Just n}
    in ((), s')
+
+-- | Sorting direction for ORDER BY clauses.
+data OrderDirection = Asc | Desc
+  deriving (Eq, Show, Generic)
+
+instance NFData OrderDirection
+
+-- | NULL placement semantics for ORDER BY clauses.
+data NullsOrder = NullsDefault | NullsFirst | NullsLast
+  deriving (Eq, Show, Generic)
+
+instance NFData NullsOrder
+
+-- | Order specification with direction and null placement semantics.
+data OrderSpec = OrderSpec
+  { orderExpr :: !Text
+  , orderDirection :: !OrderDirection
+  , orderNulls :: !NullsOrder
+  }
+  deriving (Eq, Show, Generic)
+
+instance NFData OrderSpec where
+  rnf (OrderSpec e d n) = rnf e `seq` rnf d `seq` rnf n
+
+-- | Render an OrderSpec to standard SQL text.
+renderOrderSpec :: OrderSpec -> Text
+renderOrderSpec (OrderSpec expr dir nulls) =
+  let dirText = case dir of
+        Asc -> "ASC"
+        Desc -> "DESC"
+      nullsText = case nulls of
+        NullsDefault -> ""
+        NullsFirst -> " NULLS FIRST"
+        NullsLast -> " NULLS LAST"
+   in expr <> " " <> dirText <> nullsText
+
+-- | Backward-compatible alias for rendering an order specification to text.
+unOrderSpec :: OrderSpec -> Text
+unOrderSpec = renderOrderSpec
+
+-- | Ascending ordering specification.
+asc :: ToQExpr e a => e -> OrderSpec
+asc e = OrderSpec (renderExpr (toQExpr e)) Asc NullsDefault
+
+-- | Descending ordering specification.
+desc :: ToQExpr e a => e -> OrderSpec
+desc e = OrderSpec (renderExpr (toQExpr e)) Desc NullsDefault
+
+-- | Specify NULLS FIRST placement for an ordering specification.
+nullsFirst :: OrderSpec -> OrderSpec
+nullsFirst spec = spec {orderNulls = NullsFirst}
+
+-- | Specify NULLS LAST placement for an ordering specification.
+nullsLast :: OrderSpec -> OrderSpec
+nullsLast spec = spec {orderNulls = NullsLast}
+
+-- | Class overloading 'orderBy' across window specifications and monadic Query blocks.
+class OrderBy target where
+  orderBy :: [OrderSpec] -> target
+
+instance (a ~ ()) => OrderBy (Query db a) where
+  orderBy specs = Query $ \s ->
+    let s' = s {qsOrderBy = qsOrderBy s ++ map renderOrderSpec specs}
+     in ((), s')
