@@ -25,18 +25,19 @@ import Hylo.PG.Connection
   , executeSql
   , runTx
   )
-import Hylo.Test.Docker (withTestPostgres)
+import Hylo.Test.Docker (getTestPgVersion, withTestPostgres)
 import Test.Hspec
 
--- | Integration test suite executing against real PostgreSQL 17 in Docker / Testcontainer.
+-- | Integration test suite executing against real PostgreSQL (14–18) in Docker / Testcontainer.
 spec :: Spec
 spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ do
-  it "connects to real PostgreSQL and verifies version 17 with pgvector" $
+  it "connects to real PostgreSQL and verifies version with pgvector" $
     withTestPostgres $ \p -> do
       case poolActiveConnection p of
         Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
         Just _ -> do
-          -- Verify PostgreSQL 17
+          expectedVer <- getTestPgVersion
+          -- Verify PostgreSQL version matches HYLO_TEST_PG_VERSION (or default 17)
           let versionStmt =
                 Stmt.Statement
                   "SELECT version();"
@@ -46,7 +47,7 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
           verRes <- executeSession p (Sess.statement () versionStmt)
           case verRes of
             Left err -> expectationFailure ("Failed to query PostgreSQL version: " ++ show err)
-            Right ver -> T.isInfixOf "PostgreSQL 17" ver `shouldBe` True
+            Right ver -> T.isInfixOf ("PostgreSQL " <> expectedVer) ver `shouldBe` True
 
           -- Verify vector extension
           let extStmt =

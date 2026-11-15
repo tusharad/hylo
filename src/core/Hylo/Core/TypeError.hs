@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
@@ -76,10 +77,16 @@ module Hylo.Core.TypeError
     -- * E015: Unchecked Destructive Schema Migration
   , AssertSafeMigration (..)
   , CheckSafeMigration
+
+    -- * E016: PostgreSQL Version Mismatch
+  , PGVersion (..)
+  , CheckPGMinVersion
+  , AssertPGMinVersion (..)
   ) where
 
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
+import GHC.Generics (Generic)
 import GHC.TypeLits
   ( ErrorMessage (..)
   , Nat
@@ -476,3 +483,63 @@ instance
   AssertSafeMigration isDestructive forceAllowed
   where
   safeMigrationDict _ _ = ()
+
+--------------------------------------------------------------------------------
+-- E016: PostgreSQL Version Mismatch
+--------------------------------------------------------------------------------
+
+-- | PostgreSQL engine major versions.
+data PGVersion
+  = PG14
+  | PG15
+  | PG16
+  | PG17
+  | PG18
+  deriving (Eq, Show, Enum, Bounded, Ord, Generic)
+
+-- | Closed type family validating that the target PostgreSQL version meets the feature requirement.
+type family CheckPGMinVersion (actual :: PGVersion) (required :: PGVersion) (feature :: Symbol) :: Bool where
+  -- Required PG14: supported on all PG versions
+  CheckPGMinVersion 'PG14 'PG14 _ = 'True
+  CheckPGMinVersion 'PG15 'PG14 _ = 'True
+  CheckPGMinVersion 'PG16 'PG14 _ = 'True
+  CheckPGMinVersion 'PG17 'PG14 _ = 'True
+  CheckPGMinVersion 'PG18 'PG14 _ = 'True
+  -- Required PG15: supported on PG15, PG16, PG17, PG18
+  CheckPGMinVersion 'PG15 'PG15 _ = 'True
+  CheckPGMinVersion 'PG16 'PG15 _ = 'True
+  CheckPGMinVersion 'PG17 'PG15 _ = 'True
+  CheckPGMinVersion 'PG18 'PG15 _ = 'True
+  -- Required PG16: supported on PG16, PG17, PG18
+  CheckPGMinVersion 'PG16 'PG16 _ = 'True
+  CheckPGMinVersion 'PG17 'PG16 _ = 'True
+  CheckPGMinVersion 'PG18 'PG16 _ = 'True
+  -- Required PG17: supported on PG17, PG18
+  CheckPGMinVersion 'PG17 'PG17 _ = 'True
+  CheckPGMinVersion 'PG18 'PG17 _ = 'True
+  -- Required PG18: supported on PG18 only
+  CheckPGMinVersion 'PG18 'PG18 _ = 'True
+  -- Version mismatch: emit [Hylo Error E016]
+  CheckPGMinVersion actual required feature =
+    TypeError
+      ( 'Text "[Hylo Error E016] PostgreSQL Version Mismatch"
+          ':$$: 'Text "  Context: Feature '"
+          ':<>: 'Text feature
+          ':<>: 'Text "' requires PostgreSQL "
+          ':<>: 'ShowType required
+          ':<>: 'Text " or newer, but active backend is configured for PostgreSQL "
+          ':<>: 'ShowType actual
+          ':<>: 'Text "."
+          ':$$: 'Text "  Hint:    Upgrade your target PostgreSQL backend version to 'Postgres '"
+          ':<>: 'ShowType required
+          ':<>: 'Text "' or newer (e.g. 'Postgres '"
+          ':<>: 'ShowType required
+          ':<>: 'Text "') to use this feature."
+      )
+
+-- | Capability dictionary witness for PostgreSQL minimum version check.
+class AssertPGMinVersion (actual :: PGVersion) (required :: PGVersion) (feature :: Symbol) where
+  pgMinVersionDict :: Proxy actual -> Proxy required -> Proxy feature -> ()
+
+instance (CheckPGMinVersion actual required feature ~ 'True) => AssertPGMinVersion actual required feature where
+  pgMinVersionDict _ _ _ = ()

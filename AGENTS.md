@@ -312,7 +312,7 @@ All agents and contributors working on this codebase MUST follow this branching 
 
 57. **`AllowAmbiguousTypes` for Polymorphic Capability Combinators (`viaBatchLoader @db`):**
    When defining polymorphic query or capability combinators (such as `viaBatchLoader :: forall db parent key child ...`) where the database backend type variable `db` appears only in a class constraint (`SupportsBatchLookup db`) and not in the function's arguments or return type, GHC rejects the declaration or call sites with `[GHC-39999] Could not deduce SupportsBatchLookup db0 ... type variable db0 is ambiguous`.
-   * **Rule:** Enable `{-# LANGUAGE AllowAmbiguousTypes #-}` on modules defining combinators that instantiate typeclass constraints via visible type applications (`@db` / `@DynamoDB`), and declare `forall db ...` explicitly in the signature.
+   * **Rule:** Enable `{-# LANGUAGE AllowAmbiguousTypes #-}` on modules defining combinators that instantiate typeclass constraints via visible type applications (`@db` / `@Redis`), and declare `forall db ...` explicitly in the signature.
 
 58. **Monomorphic `Text` Return Types for Dialect SQL Renderers in Test Assertions:**
    When backend renderers (`renderPostgresSQL`, `renderSQLiteSQL`) are typed with polymorphic string return types `(Projectable a, IsString s) => ... -> s`, comparing them in tests via `pgSQL `shouldBe` sqliteSQL` causes GHC to fail with `[GHC-39999] Ambiguous type variable a0 arising from use of 'shouldBe'`. Because neither side of `shouldBe` is a concrete literal or type-annotated value, GHC cannot resolve the polymorphic type variable `s`.

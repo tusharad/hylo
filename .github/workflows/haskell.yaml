@@ -46,9 +46,14 @@ jobs:
       run:
         shell: bash
 
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ["14", "15", "16", "17", "18"]
+
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: pgvector/pgvector:pg${{ matrix.pg }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -63,6 +68,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hylo_test
+      HYLO_TEST_PG_VERSION: ${{ matrix.pg }}
 
     steps:
       - name: Checkout repository

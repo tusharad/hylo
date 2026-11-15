@@ -4,8 +4,10 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -20,7 +22,7 @@ Maintainer  : tusharadhatrao@gmail.com
 Fine-grained single-parameter typeclasses gating advanced database capabilities
 (relational joins, lateral subqueries, returning clauses, key-value ops, window functions,
 transactions, vector search, batch lookup, and recursive CTEs) across PostgreSQL, MySQL,
-SQLite, Redis, MongoDB, and DynamoDB.
+SQLite, and Redis.
 Unsupported feature usage fails statically at compile time with '[Hylo Error E008]'.
 -}
 module Hylo.Backend.Capability
@@ -30,8 +32,6 @@ module Hylo.Backend.Capability
   , MySQL
   , SQLite
   , Redis
-  , MongoDB
-  , DynamoDB
 
     -- * Capability Typeclasses
   , SupportsRelationalJoins (..)
@@ -50,6 +50,22 @@ module Hylo.Backend.Capability
     -- * Custom Diagnostic Codes
   , AssertBackendCapability (..)
   , CheckBackendCapability
+  , CheckPGMinVersion
+  , AssertPGMinVersion (..)
+
+    -- * PostgreSQL Version-Gated Features (E016)
+  , uniqueNullsNotDistinct
+  , uniqueNullsNotDistinctConstraint
+  , mergeInto
+  , mergeReturning
+  , returningWithOldNew
+  , uuidv7
+  , uuidv7Tx
+  , pg15UniqueNullsNotDistinctDict
+  , pg15MergeIntoDict
+  , pg17MergeReturningDict
+  , pg18ReturningWithOldNewDict
+  , pg18UuidV7Dict
 
     -- * DataLoader Batching Abstraction
   , DataLoaderBatch (..)
@@ -60,20 +76,26 @@ module Hylo.Backend.Capability
 import Data.List (nub)
 import qualified Data.Map.Strict as Map
 import Data.Proxy (Proxy (..))
+import Data.Text (Text)
+import Data.UUID (UUID)
 import GHC.Generics (Generic)
-import Hylo.Core.TypeError (AssertBackendCapability (..), CheckBackendCapability)
+import Hylo.Core.Changeset (Changeset (..), ConstraintDeclaration (..))
+import Hylo.Core.Expr (QExpr (..))
+import Hylo.Core.Transaction (Tx (..), recordMutation)
+import Hylo.Core.TypeError
+  ( AssertBackendCapability (..)
+  , AssertPGMinVersion (..)
+  , AssertWritable (..)
+  , CheckBackendCapability
+  , CheckPGMinVersion
+  , PGVersion (..)
+  , TxMode (..)
+  , writableDict
+  )
 
 --------------------------------------------------------------------------------
 -- 0. Database Backend Markers & Engine Versions
 --------------------------------------------------------------------------------
-
--- | PostgreSQL engine major versions.
-data PGVersion
-  = PG14
-  | PG15
-  | PG16
-  | PG17
-  deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Target backend tag for PostgreSQL, optionally parameterized by engine version.
 data Postgres (v :: PGVersion)
@@ -86,12 +108,6 @@ data SQLite
 
 -- | Target backend tag for Redis in-memory key-value engine.
 data Redis
-
--- | Target backend tag for MongoDB document database engine.
-data MongoDB
-
--- | Target backend tag for DynamoDB key-value/document database engine.
-data DynamoDB
 
 --------------------------------------------------------------------------------
 -- 1. Capability Typeclasses
@@ -347,121 +363,7 @@ instance
     backendCapabilityDict (Proxy @"Recursive CTEs") (Proxy @"Redis") (Proxy @'False)
 
 --------------------------------------------------------------------------------
--- 6. Capability Instances: MongoDB
---------------------------------------------------------------------------------
-
-instance
-  (AssertBackendCapability "Relational Joins" "MongoDB" 'False) =>
-  SupportsRelationalJoins MongoDB
-  where
-  relationalJoinsDict _ =
-    backendCapabilityDict (Proxy @"Relational Joins") (Proxy @"MongoDB") (Proxy @'False)
-
-instance
-  (AssertBackendCapability "Lateral Subqueries" "MongoDB" 'False) =>
-  SupportsLateralSubqueries MongoDB
-  where
-  lateralSubqueriesDict _ =
-    backendCapabilityDict (Proxy @"Lateral Subqueries") (Proxy @"MongoDB") (Proxy @'False)
-
-instance
-  (AssertBackendCapability "Returning Clause" "MongoDB" 'False) =>
-  SupportsReturningClause MongoDB
-  where
-  returningClauseDict _ =
-    backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"MongoDB") (Proxy @'False)
-
-instance
-  (AssertBackendCapability "Window Functions" "MongoDB" 'False) =>
-  SupportsWindowFunctions MongoDB
-  where
-  windowFunctionsDict _ =
-    backendCapabilityDict (Proxy @"Window Functions") (Proxy @"MongoDB") (Proxy @'False)
-
-instance SupportsTransactions MongoDB where
-  transactionsDict _ = ()
-
-instance SupportsVectorSearch MongoDB where
-  vectorSearchDict _ = ()
-
-instance SupportsBatchLookup MongoDB where
-  batchLookupDict _ = ()
-
-instance
-  (AssertBackendCapability "CTEs" "MongoDB" 'False) =>
-  SupportsCTE MongoDB
-  where
-  cteDict _ =
-    backendCapabilityDict (Proxy @"CTEs") (Proxy @"MongoDB") (Proxy @'False)
-
-instance
-  (AssertBackendCapability "Recursive CTEs" "MongoDB" 'False) =>
-  SupportsRecursiveCTE MongoDB
-  where
-  recursiveCTEDict _ =
-    backendCapabilityDict (Proxy @"Recursive CTEs") (Proxy @"MongoDB") (Proxy @'False)
-
---------------------------------------------------------------------------------
--- 7. Capability Instances: DynamoDB
---------------------------------------------------------------------------------
-
-instance
-  (AssertBackendCapability "Relational Joins" "DynamoDB" 'False) =>
-  SupportsRelationalJoins DynamoDB
-  where
-  relationalJoinsDict _ =
-    backendCapabilityDict (Proxy @"Relational Joins") (Proxy @"DynamoDB") (Proxy @'False)
-
-instance
-  (AssertBackendCapability "Lateral Subqueries" "DynamoDB" 'False) =>
-  SupportsLateralSubqueries DynamoDB
-  where
-  lateralSubqueriesDict _ =
-    backendCapabilityDict (Proxy @"Lateral Subqueries") (Proxy @"DynamoDB") (Proxy @'False)
-
-instance
-  (AssertBackendCapability "Returning Clause" "DynamoDB" 'False) =>
-  SupportsReturningClause DynamoDB
-  where
-  returningClauseDict _ =
-    backendCapabilityDict (Proxy @"Returning Clause") (Proxy @"DynamoDB") (Proxy @'False)
-
-instance
-  (AssertBackendCapability "Window Functions" "DynamoDB" 'False) =>
-  SupportsWindowFunctions DynamoDB
-  where
-  windowFunctionsDict _ =
-    backendCapabilityDict (Proxy @"Window Functions") (Proxy @"DynamoDB") (Proxy @'False)
-
-instance SupportsTransactions DynamoDB where
-  transactionsDict _ = ()
-
-instance
-  (AssertBackendCapability "Vector Search" "DynamoDB" 'False) =>
-  SupportsVectorSearch DynamoDB
-  where
-  vectorSearchDict _ =
-    backendCapabilityDict (Proxy @"Vector Search") (Proxy @"DynamoDB") (Proxy @'False)
-
-instance SupportsBatchLookup DynamoDB where
-  batchLookupDict _ = ()
-
-instance
-  (AssertBackendCapability "CTEs" "DynamoDB" 'False) =>
-  SupportsCTE DynamoDB
-  where
-  cteDict _ =
-    backendCapabilityDict (Proxy @"CTEs") (Proxy @"DynamoDB") (Proxy @'False)
-
-instance
-  (AssertBackendCapability "Recursive CTEs" "DynamoDB" 'False) =>
-  SupportsRecursiveCTE DynamoDB
-  where
-  recursiveCTEDict _ =
-    backendCapabilityDict (Proxy @"Recursive CTEs") (Proxy @"DynamoDB") (Proxy @'False)
-
---------------------------------------------------------------------------------
--- 8. DataLoader Batching Abstraction
+-- 6. DataLoader Batching Abstraction
 --------------------------------------------------------------------------------
 
 -- | DataLoader batch execution tracking structure.
@@ -508,3 +410,125 @@ viaBatchLoader ::
 viaBatchLoader parents getParentKey fetchChildren getChildKey =
   batchLookupDict (Proxy @db) `seq`
     runBatchLoader parents getParentKey fetchChildren getChildKey
+
+--------------------------------------------------------------------------------
+-- 7. PostgreSQL Version-Gated Features ([Hylo Error E016])
+--------------------------------------------------------------------------------
+
+-- | UNIQUE NULLS NOT DISTINCT constraint (requires PostgreSQL 15+).
+uniqueNullsNotDistinct ::
+  forall (v :: PGVersion).
+  (AssertPGMinVersion v 'PG15 "UNIQUE NULLS NOT DISTINCT") =>
+  Text ->
+  Text
+uniqueNullsNotDistinct col =
+  pgMinVersionDict (Proxy @v) (Proxy @'PG15) (Proxy @"UNIQUE NULLS NOT DISTINCT") `seq`
+    ("UNIQUE NULLS NOT DISTINCT (" <> col <> ")")
+
+-- | Declare a UNIQUE NULLS NOT DISTINCT constraint in a Changeset (requires PostgreSQL 15+).
+uniqueNullsNotDistinctConstraint ::
+  forall (v :: PGVersion) table op.
+  (AssertPGMinVersion v 'PG15 "UNIQUE NULLS NOT DISTINCT") =>
+  Text ->
+  Changeset table op ->
+  Changeset table op
+uniqueNullsNotDistinctConstraint col cs =
+  pgMinVersionDict (Proxy @v) (Proxy @'PG15) (Proxy @"UNIQUE NULLS NOT DISTINCT") `seq`
+    let decl = UniqueConstraint col Nothing "must be unique (nulls not distinct)"
+     in cs {changesetConstraints = changesetConstraints cs ++ [decl]}
+
+-- | MERGE INTO statement (requires PostgreSQL 15+).
+mergeInto ::
+  forall (v :: PGVersion) (mode :: TxMode).
+  (AssertWritable mode, AssertPGMinVersion v 'PG15 "MERGE INTO") =>
+  Text ->
+  Tx (Postgres v) mode ()
+mergeInto rawSql =
+  writableDict (Proxy :: Proxy mode)
+    `seq` pgMinVersionDict (Proxy @v) (Proxy @'PG15) (Proxy @"MERGE INTO")
+    `seq` recordMutation ("MERGE INTO " <> rawSql)
+
+-- | MERGE ... RETURNING statement (requires PostgreSQL 17+).
+mergeReturning ::
+  forall (v :: PGVersion) (mode :: TxMode).
+  (AssertWritable mode, AssertPGMinVersion v 'PG17 "MERGE ... RETURNING") =>
+  Text ->
+  Tx (Postgres v) mode ()
+mergeReturning rawSql =
+  writableDict (Proxy :: Proxy mode)
+    `seq` pgMinVersionDict (Proxy @v) (Proxy @'PG17) (Proxy @"MERGE ... RETURNING")
+    `seq` recordMutation ("MERGE ... RETURNING " <> rawSql)
+
+-- | RETURNING WITH (OLD AS old, NEW AS new) clause (requires PostgreSQL 18+).
+returningWithOldNew ::
+  forall (v :: PGVersion) (mode :: TxMode).
+  (AssertWritable mode, AssertPGMinVersion v 'PG18 "RETURNING WITH (OLD AS old, NEW AS new)") =>
+  Text ->
+  Tx (Postgres v) mode ()
+returningWithOldNew rawSql =
+  writableDict (Proxy :: Proxy mode)
+    `seq` pgMinVersionDict (Proxy @v) (Proxy @'PG18) (Proxy @"RETURNING WITH (OLD AS old, NEW AS new)")
+    `seq` recordMutation ("RETURNING WITH (OLD AS old, NEW AS new) " <> rawSql)
+
+-- | Server-side uuidv7() SQL expression (requires PostgreSQL 18+).
+uuidv7 ::
+  forall (v :: PGVersion).
+  (AssertPGMinVersion v 'PG18 "server-side uuidv7()") =>
+  QExpr UUID
+uuidv7 =
+  pgMinVersionDict (Proxy @v) (Proxy @'PG18) (Proxy @"server-side uuidv7()") `seq`
+    LitExpr "uuidv7()"
+
+-- | Server-side uuidv7() within a Tx computation (requires PostgreSQL 18+).
+uuidv7Tx ::
+  forall (v :: PGVersion) (mode :: TxMode).
+  (AssertPGMinVersion v 'PG18 "server-side uuidv7()") =>
+  Tx (Postgres v) mode UUID
+uuidv7Tx =
+  pgMinVersionDict (Proxy @v) (Proxy @'PG18) (Proxy @"server-side uuidv7()") `seq`
+    TxAction (Right (errorWithoutStackTrace "uuidv7: evaluated offline"),)
+
+-- | Capability dictionary witness for PG15 UNIQUE NULLS NOT DISTINCT.
+pg15UniqueNullsNotDistinctDict ::
+  forall (v :: PGVersion).
+  (AssertPGMinVersion v 'PG15 "UNIQUE NULLS NOT DISTINCT") =>
+  Proxy (v :: PGVersion) ->
+  ()
+pg15UniqueNullsNotDistinctDict p =
+  pgMinVersionDict p (Proxy @'PG15) (Proxy @"UNIQUE NULLS NOT DISTINCT")
+
+-- | Capability dictionary witness for PG15 MERGE INTO.
+pg15MergeIntoDict ::
+  forall (v :: PGVersion).
+  (AssertPGMinVersion v 'PG15 "MERGE INTO") =>
+  Proxy (v :: PGVersion) ->
+  ()
+pg15MergeIntoDict p =
+  pgMinVersionDict p (Proxy @'PG15) (Proxy @"MERGE INTO")
+
+-- | Capability dictionary witness for PG17 MERGE ... RETURNING.
+pg17MergeReturningDict ::
+  forall (v :: PGVersion).
+  (AssertPGMinVersion v 'PG17 "MERGE ... RETURNING") =>
+  Proxy (v :: PGVersion) ->
+  ()
+pg17MergeReturningDict p =
+  pgMinVersionDict p (Proxy @'PG17) (Proxy @"MERGE ... RETURNING")
+
+-- | Capability dictionary witness for PG18 RETURNING WITH.
+pg18ReturningWithOldNewDict ::
+  forall (v :: PGVersion).
+  (AssertPGMinVersion v 'PG18 "RETURNING WITH (OLD AS old, NEW AS new)") =>
+  Proxy (v :: PGVersion) ->
+  ()
+pg18ReturningWithOldNewDict p =
+  pgMinVersionDict p (Proxy @'PG18) (Proxy @"RETURNING WITH (OLD AS old, NEW AS new)")
+
+-- | Capability dictionary witness for PG18 uuidv7().
+pg18UuidV7Dict ::
+  forall (v :: PGVersion).
+  (AssertPGMinVersion v 'PG18 "server-side uuidv7()") =>
+  Proxy (v :: PGVersion) ->
+  ()
+pg18UuidV7Dict p =
+  pgMinVersionDict p (Proxy @'PG18) (Proxy @"server-side uuidv7()")
