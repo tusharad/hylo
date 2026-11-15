@@ -107,6 +107,7 @@ library hylo-pg
       Hylo.PG.Error.Translation
       Hylo.PG.Hydration.Graph
       Hylo.PG.Mutation.Bulk
+      Hylo.PG.Mutation.Changeset
       Hylo.PG.Mutation.Locking
       Hylo.PG.Mutation.Upsert
       Hylo.PG.Pool.Routing
@@ -241,6 +242,7 @@ test-suite hylo-test
       Hylo.PG.Compiler.LateralSpec
       Hylo.PG.Compiler.WindowSpec
       Hylo.PG.Mutation.BulkSpec
+      Hylo.PG.Mutation.ChangesetSpec
       Hylo.PG.Mutation.UpsertSpec
       Hylo.PG.RealPostgresSpec
       Hylo.PG.Search.HybridSpec

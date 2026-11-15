@@ -23,6 +23,7 @@ module Hylo.PG
   , module Hylo.PG.Transaction.Hooks
   , module Hylo.PG.Pool.Routing
   , module Hylo.PG.Mutation.Bulk
+  , module Hylo.PG.Mutation.Changeset
   , module Hylo.PG.Error.Translation
   , module Hylo.PG.Vector
   , module Hylo.PG.Search.Hybrid
@@ -40,6 +41,7 @@ import Hylo.PG.Connection
 import Hylo.PG.Error.Translation
 import Hylo.PG.Hydration.Graph
 import Hylo.PG.Mutation.Bulk
+import Hylo.PG.Mutation.Changeset
 import Hylo.PG.Mutation.Locking
 import Hylo.PG.Mutation.Upsert
 import Hylo.PG.Pool.Routing
