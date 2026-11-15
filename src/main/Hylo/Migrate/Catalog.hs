@@ -1,6 +1,10 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
 Module      : Hylo.Migrate.Catalog
@@ -20,6 +24,10 @@ module Hylo.Migrate.Catalog
   , lookupTable
   , listTables
 
+    -- * Bridge from TableSchema to Catalog (User Story 11)
+  , tableSchemaToDef
+  , schemasToCatalog
+
     -- * Sample Catalog Definitions (Test Oracles)
   , sampleDocumentCatalogDef
 
@@ -34,8 +42,13 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
+import GHC.TypeLits (natVal)
+import Hylo.Core.Context (ColDef (..), LogicalType (..))
+import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.Migrate.AST
+import Text.Read (readMaybe)
 
 -- | Database schema catalog state containing all defined tables, extensions, and enums.
 data Catalog = Catalog
@@ -71,6 +84,94 @@ lookupTable name cat = Map.lookup name (catalogTables cat)
 -- | List all table definitions currently registered in the catalog.
 listTables :: Catalog -> [TableDef]
 listTables = Map.elems . catalogTables
+
+-- | Bridge an in-memory Haskell 'TableSchema' to a migration 'TableDef'.
+tableSchemaToDef :: (Table table) => TableSchema table -> TableDef
+tableSchemaToDef schema =
+  TableDef
+    { tblName = TableName (tableName schema)
+    , tblColumns = map colDefToColumnDef (tableColDefs (tableMeta schema))
+    , tblIndexes = []
+    , tblConstraints = []
+    , tblComment = Nothing
+    }
+
+-- | Construct a 'Catalog' from a list of 'TableDef' definitions.
+schemasToCatalog :: [TableDef] -> Catalog
+schemasToCatalog defs =
+  Catalog
+    { catalogTables = Map.fromList [(tblName def, def) | def <- defs]
+    , catalogExtensions = Set.empty
+    , catalogEnums = Map.empty
+    }
+
+-- | Convert a core 'ColDef ()' to an AST 'ColumnDef'.
+colDefToColumnDef :: ColDef () -> ColumnDef
+colDefToColumnDef c =
+  ColumnDef
+    { colName = ColumnName c.colName
+    , colType = logicalAndSqlToColumnType c.colLogicalType c.colSqlType
+    , colNullability = if c.colIsNullable then Nullable else NotNull
+    , colDefault = Nothing
+    , colIsPrimaryKey = c.colIsPrimaryKey
+    , colComment = c.colDescription
+    }
+
+-- | Resolve logical type and SQL type string to AST 'ColumnType'.
+logicalAndSqlToColumnType :: LogicalType a -> Text -> ColumnType
+logicalAndSqlToColumnType lt rawSql =
+  let sql = T.toLower (T.strip rawSql)
+   in case lt of
+        LInt64
+          | sql == "integer" || sql == "int4" || sql == "int" -> TypeInteger
+          | sql == "smallint" || sql == "int2" -> TypeSmallInt
+          | otherwise -> TypeBigInt
+        LText
+          | "varchar(" `T.isPrefixOf` sql && ")" `T.isSuffixOf` sql ->
+              let lenStr = T.dropEnd 1 (T.drop 8 sql)
+               in TypeVarChar (readMaybe (T.unpack lenStr))
+          | sql == "varchar" -> TypeVarChar Nothing
+          | otherwise -> TypeText
+        LBool -> TypeBoolean
+        LUTCTime
+          | sql == "timestamp" -> TypeTimestamp
+          | sql == "timestamptz" -> TypeTimestamptz
+          | sql == "date" -> TypeDate
+          | sql == "time" -> TypeTime
+          | otherwise -> TypeTimestamptz
+        LUUID -> TypeUuid
+        LJson
+          | sql == "json" -> TypeJson
+          | sql == "jsonb" -> TypeJsonb
+          | otherwise -> TypeJsonb
+        LVector p -> TypeVector (Just (fromIntegral (natVal p)))
+        LCustom _ -> case sql of
+          "smallint" -> TypeSmallInt
+          "int2" -> TypeSmallInt
+          "integer" -> TypeInteger
+          "int4" -> TypeInteger
+          "int" -> TypeInteger
+          "bigint" -> TypeBigInt
+          "int8" -> TypeBigInt
+          "text" -> TypeText
+          "varchar" -> TypeVarChar Nothing
+          "boolean" -> TypeBoolean
+          "bool" -> TypeBoolean
+          "timestamp" -> TypeTimestamp
+          "timestamptz" -> TypeTimestamptz
+          "date" -> TypeDate
+          "time" -> TypeTime
+          "json" -> TypeJson
+          "jsonb" -> TypeJsonb
+          "uuid" -> TypeUuid
+          other
+            | "vector(" `T.isPrefixOf` other && ")" `T.isSuffixOf` other ->
+                let dimStr = T.dropEnd 1 (T.drop 7 other)
+                 in TypeVector (readMaybe (T.unpack dimStr))
+            | "varchar(" `T.isPrefixOf` other && ")" `T.isSuffixOf` other ->
+                let lenStr = T.dropEnd 1 (T.drop 8 other)
+                 in TypeVarChar (readMaybe (T.unpack lenStr))
+            | otherwise -> TypeCustom rawSql
 
 {- | Standard sample catalog definition for documents with vector embedding and HNSW index.
 Matches Oracle specification 18.4.
