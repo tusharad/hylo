@@ -35,6 +35,7 @@ module Hylo.SQL.Builder
   , initialBuilderState
   , SqlBuilderM
   , runSqlBuilderM
+  , runSqlBuilderWithState
   , evalSqlBuilderM
   , execSqlBuilderM
 
@@ -214,6 +215,10 @@ type SqlBuilderM = State SqlBuilderState
 -- | Run a builder computation starting with a fresh state for a dialect.
 runSqlBuilderM :: Dialect -> SqlBuilderM a -> (a, SqlBuilderState)
 runSqlBuilderM d act = runState act (initialBuilderState d)
+
+-- | Run a builder computation with an explicitly provided initial builder state.
+runSqlBuilderWithState :: SqlBuilderState -> SqlBuilderM a -> (a, SqlBuilderState)
+runSqlBuilderWithState st act = runState act st
 
 -- | Evaluate a builder computation, discarding the final state.
 evalSqlBuilderM :: Dialect -> SqlBuilderM a -> a
@@ -443,17 +448,17 @@ compileQuery d q =
 compileQueryAST :: Dialect -> [Text] -> QueryState -> CompiledQuery
 compileQueryAST d rawProjections st =
   case qsUpsert st of
-    Just upsertSql ->
+    Just (upsertSql, params) ->
       CompiledQuery
         { compiledSQL = upsertSql
-        , compiledParams = Seq.empty
+        , compiledParams = Seq.fromList params
         }
     Nothing ->
       case qsCustomQuery st of
-        Just customSql ->
+        Just (customSql, params) ->
           CompiledQuery
             { compiledSQL = customSql
-            , compiledParams = Seq.empty
+            , compiledParams = Seq.fromList params
             }
         Nothing ->
           let act = buildQueryParts d rawProjections st

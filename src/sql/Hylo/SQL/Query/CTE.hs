@@ -322,10 +322,10 @@ mkCTERef name =
 renderQueryInner :: Projectable a => a -> QueryState -> Text
 renderQueryInner res st =
   case qsUpsert st of
-    Just upsertSql -> upsertSql
+    Just (upsertSql, _) -> upsertSql
     Nothing ->
       case qsCustomQuery st of
-        Just customSql -> customSql
+        Just (customSql, _) -> customSql
         Nothing ->
           let projections = projectColumns res
               selectClause =

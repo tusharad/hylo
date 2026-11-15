@@ -31,13 +31,15 @@ module Hylo.PG.Mutation.UpsertSpec
 import Control.DeepSeq (NFData (..))
 import Data.Int (Int64)
 import Data.List (nub)
+import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core
 import Hylo.Core.Query
-import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.PG.Compiler.SQL (compilePostgresQuery, renderSQL)
 import Hylo.PG.Mutation.Locking
 import Hylo.PG.Mutation.Upsert
+import Hylo.SQL.Builder (CompiledQuery (..))
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
@@ -178,7 +180,11 @@ spec = describe "Epic 9: High-Throughput Upserts & Pessimistic Locking" $ do
       sql `shouldContain` "INSERT INTO \"users\""
       sql `shouldContain` "ON CONFLICT ON CONSTRAINT \"users_email_key\" DO UPDATE SET"
       sql `shouldContain` "\"last_login_at\" = EXCLUDED.\"last_login_at\""
-      sql `shouldContain` "\"login_count\" = (\"users\".\"login_count\" + 1)"
+      sql `shouldContain` "\"login_count\" = (\"users\".\"login_count\" + $5)"
+      let preview = previewPostgresSQL action
+      T.unpack preview `shouldContain` "\"login_count\" = (\"users\".\"login_count\" + 1)"
+      let compiled = compilePostgresQuery action
+      Seq.length compiled.compiledParams `shouldBe` 5
 
     it "compiles FOR UPDATE SKIP LOCKED for high-throughput job queues" $ do
       let q = do

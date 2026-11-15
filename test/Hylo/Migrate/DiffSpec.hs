@@ -470,3 +470,21 @@ spec = describe "Epic 18: Live Catalog Introspection & DDL Synthesis" $ do
       let tblDef = tableSchemaToDef accountSchema
           cat = schemasToCatalog [tblDef]
       lookupTable (TableName "accounts") cat `shouldBe` Just tblDef
+
+    it "diffing tableSchemaToDef against buildCatalogFromRows produces emptyCatalogDiff" $ do
+      let tblRows = [PGTableRow "accounts" Nothing]
+          colRows =
+            [ PGColumnRow "accounts" "id" "bigint" True Nothing Nothing
+            , PGColumnRow "accounts" "name" "text" True Nothing Nothing
+            , PGColumnRow "accounts" "email" "text" True Nothing Nothing
+            , PGColumnRow "accounts" "score" "bigint" True Nothing Nothing
+            , PGColumnRow "accounts" "active" "boolean" True Nothing Nothing
+            ]
+          idxRows = []
+          conRows =
+            [ PGConstraintRow "accounts_pkey" "accounts" "p" "PRIMARY KEY (id)"
+            ]
+          dbCat = buildCatalogFromRows tblRows colRows idxRows conRows
+          haskellCat = schemasToCatalog [tableSchemaToDef accountSchema]
+          diff = computeCatalogDiff dbCat haskellCat
+      diff `shouldBe` emptyCatalogDiff

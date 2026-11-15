@@ -88,13 +88,18 @@ listTables = Map.elems . catalogTables
 -- | Bridge an in-memory Haskell 'TableSchema' to a migration 'TableDef'.
 tableSchemaToDef :: (Table table) => TableSchema table -> TableDef
 tableSchemaToDef schema =
-  TableDef
-    { tblName = TableName (tableName schema)
-    , tblColumns = map colDefToColumnDef (tableColDefs (tableMeta schema))
-    , tblIndexes = []
-    , tblConstraints = []
-    , tblComment = Nothing
-    }
+  let colDefs = tableColDefs (tableMeta schema)
+      pkCols = [ColumnName c.colName | c <- colDefs, c.colIsPrimaryKey]
+      pkConstraints = case pkCols of
+        [] -> []
+        cols -> [PrimaryKeyConstraint (ConstraintName (tableName schema <> "_pkey")) cols]
+   in TableDef
+        { tblName = TableName (tableName schema)
+        , tblColumns = map colDefToColumnDef colDefs
+        , tblIndexes = []
+        , tblConstraints = pkConstraints
+        , tblComment = Nothing
+        }
 
 -- | Construct a 'Catalog' from a list of 'TableDef' definitions.
 schemasToCatalog :: [TableDef] -> Catalog

@@ -26,15 +26,17 @@ module Hylo.PG.Search.HybridSpec (spec) where
 
 import Control.DeepSeq (rnf)
 import Data.Int (Int64)
+import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import Hylo.Core.Context (Col, Ctx (..))
 import Hylo.Core.Expr (QExpr (..), colExpr)
 import Hylo.Core.Key (Id (..))
 import Hylo.Core.Query (Query (..))
 import Hylo.Core.Table (Table (..), TableSchema (..), colSpecExpr, column, primaryKey, tableSchema)
-import Hylo.PG.Compiler.SQL (renderSQL)
+import Hylo.PG.Compiler.SQL (compilePostgresQuery, renderSQL)
 import Hylo.PG.Search.Hybrid
 import Hylo.SQL.AST (Projectable (..), renderExpr)
+import Hylo.SQL.Builder (BoundParam (..), CompiledQuery (..))
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
 import Test.QuickCheck
@@ -87,11 +89,22 @@ spec = describe "Epic 16: Single-Trip Hybrid RRF Search" $ do
               queryEmb
               60 -- k smoothing constant
               20 -- limit
-          sql = renderSQL (q documentTable)
+          queryAction = q documentTable
+          sql = renderSQL queryAction
       sql
         `shouldContain` "ts_rank_cd(to_tsvector('english', \"documents\".\"body\"), to_tsquery('english', $1))"
       sql `shouldContain` "(\"documents\".\"embedding\" <=> $2)"
       sql `shouldContain` "(1.0 / (60 + \"lex_rank\")) + (1.0 / (60 + \"vec_rank\")) AS \"rrf_score\""
+      let compiled = compilePostgresQuery queryAction
+      Seq.length compiled.compiledParams `shouldBe` 2
+      let p1 = Seq.index compiled.compiledParams 0
+          p2 = Seq.index compiled.compiledParams 1
+      p1.paramIndex `shouldBe` 1
+      p1.paramValue `shouldBe` queryText
+      p1.paramType `shouldBe` "text"
+      p2.paramIndex `shouldBe` 2
+      p2.paramValue `shouldBe` renderVectorText queryEmb
+      p2.paramType `shouldBe` "vector"
 
   describe "Contract Elicitation: Formal Laws" $ do
     it "Law 1: Monotonicity of Reciprocal Rank Fusion (Better ranks yield higher/equal RRF score)" $ do

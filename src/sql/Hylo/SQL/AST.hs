@@ -38,6 +38,7 @@ import Control.DeepSeq (NFData (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hylo.Core.Expr (QExpr (..))
+import Hylo.Core.Transaction (BoundParam (..))
 
 instance NFData (QExpr a) where
   rnf expr = case expr of
@@ -202,8 +203,8 @@ data QueryState = QueryState
   , qsLimit :: !(Maybe Int)
   , qsOffset :: !(Maybe Int)
   , qsLock :: !(Maybe LockClause)
-  , qsUpsert :: !(Maybe Text)
-  , qsCustomQuery :: !(Maybe Text)
+  , qsUpsert :: !(Maybe (Text, [BoundParam]))
+  , qsCustomQuery :: !(Maybe (Text, [BoundParam]))
   }
   deriving (Eq, Show)
 

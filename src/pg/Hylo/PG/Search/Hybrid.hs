@@ -64,6 +64,7 @@ import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr (..))
 import Hylo.Core.Query (Postgres, Query (..), QueryState (..))
 import Hylo.Core.Table (Table (..), TableSchema (..))
+import Hylo.Core.Transaction (BoundParam (..))
 import Hylo.Core.TypeError (AssertBackendCapability (..))
 import Hylo.PG.Search.RRF
 import Hylo.PG.Vector
@@ -305,6 +306,10 @@ hybridSearchRRFWith cfg textSel queryText embSel queryEmb k limitCount schema =
           , hsaConfig = cfg
           }
       renderedSql = renderHybridSearchSQL act
+      params =
+        [ BoundParam (hscLexicalParamIndex cfg) queryText "text"
+        , BoundParam (hscVectorParamIndex cfg) (renderVectorText queryEmb) "vector"
+        ]
       res =
         HybridSearchResult
           { searchRecord = tExpr
@@ -314,5 +319,5 @@ hybridSearchRRFWith cfg textSel queryText embSel queryEmb k limitCount schema =
           }
    in Query $ \s ->
         hybridSearchDict (Proxy @db) `seq`
-          let s' = s {qsCustomQuery = Just renderedSql}
+          let s' = s {qsCustomQuery = Just (renderedSql, params)}
            in (res, s')
