@@ -127,9 +127,11 @@ textToLogicalType raw =
    in case t of
         "bigint" -> LInt64
         "int8" -> LInt64
-        "integer" -> LInt64
-        "int" -> LInt64
-        "int4" -> LInt64
+        "integer" -> LCustom "integer"
+        "int" -> LCustom "integer"
+        "int4" -> LCustom "integer"
+        "smallint" -> LCustom "smallint"
+        "int2" -> LCustom "smallint"
         "text" -> LText
         "varchar" -> LText
         "string" -> LText

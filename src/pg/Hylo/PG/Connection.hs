@@ -270,6 +270,7 @@ interpolateParams sql params = go sql
 -- | Value encoder for a single bound parameter based on its inferred logical/SQL type.
 boundParamValueEncoder :: Text -> Enc.Value Text
 boundParamValueEncoder pType
+  | "[]" `T.isSuffixOf` pType = contramap TE.encodeUtf8 Enc.unknown
   | pType == "integer" || pType == "int4" = contramap parseOrZero Enc.int4
   | pType == "bigint" || pType == "int8" = contramap parseOrZero Enc.int8
   | pType == "smallint" || pType == "int2" = contramap parseOrZero Enc.int2
@@ -334,10 +335,20 @@ Uses a row-discarding decoder when the query contains RETURNING or SELECT.
 -}
 mkPreparedStatement :: ByteString -> [BoundParam] -> Stmt.Statement [BoundParam] ()
 mkPreparedStatement sqlBS ps =
-  let u = T.toUpper (TE.decodeUtf8 sqlBS)
-      isReturningOrSelect = "RETURNING" `T.isInfixOf` u || "SELECT" `T.isInfixOf` u
+  let u = T.toUpper (T.strip (TE.decodeUtf8 sqlBS))
+      isReturning = "RETURNING" `T.isInfixOf` u
+      isSelectTopLevel =
+        "SELECT" `T.isPrefixOf` u
+          || ( "WITH" `T.isPrefixOf` u
+                 && not
+                   ( "INSERT" `T.isInfixOf` u
+                       || "UPDATE" `T.isInfixOf` u
+                       || "DELETE" `T.isInfixOf` u
+                   )
+             )
+      isRowProducing = isReturning || isSelectTopLevel
       decoder =
-        if isReturningOrSelect
+        if isRowProducing
           then void (Dec.rowList rawColumnDecoder)
           else Dec.noResult
    in Stmt.Statement sqlBS (buildParamsEncoder ps) decoder True

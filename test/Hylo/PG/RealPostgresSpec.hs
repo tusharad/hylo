@@ -45,6 +45,7 @@ import qualified Hasql.Statement as Stmt
 import Hylo.Backend.Capability (PGVersion (..), Postgres)
 import Hylo.Core
   ( Col
+  , ColDef (..)
   , Ctx (..)
   , Id (..)
   , PatchField (..)
@@ -57,11 +58,12 @@ import Hylo.Core
   , patchEntry
   , primaryKey
   , tableSchema
+  , toId
   )
 import Hylo.Core.Changeset (OpKind (..), change)
 import Hylo.Core.Codec (Codec (..), field)
 import Hylo.Core.Expr (lit, (==.))
-import Hylo.Core.Query (each, where_)
+import Hylo.Core.Query (delete, each, where_)
 import Hylo.Core.Transaction
   ( BoundParam (..)
   , Tx (..)
@@ -93,6 +95,7 @@ import Hylo.PG.Connection
   , selectRowsTx
   , selectRowsTxWith
   )
+import Hylo.PG.Mutation.Bulk (BulkInsertable (..), insertMany_)
 import Hylo.PG.Mutation.Changeset
   ( ChangesetError (..)
   , TableCodec (..)
@@ -603,6 +606,78 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
           rows2 <- selectRows p q2
           rows2 `shouldBe` Right [Account (Id 2) "Bob" "bob@example.com" 50 True]
 
+          -- 6. User Story 16: Bulk UNNEST array ingestion and delete
+          let cs3 =
+                change @'InsertOp
+                  (Account (SetTo (Id 3)) (SetTo "Charlie") (SetTo "charlie@example.com") (SetTo 75) (SetTo False))
+              cs4 =
+                change @'InsertOp
+                  (Account (SetTo (Id 4)) (SetTo "Diana") (SetTo "diana@example.com") (SetTo 90) (SetTo True))
+              cs5 =
+                change @'InsertOp
+                  (Account (SetTo (Id 5)) (SetTo "Evan") (SetTo "evan@example.com") (SetTo 120) (SetTo False))
+              bulkTx = insertMany_ accountSchema [cs3, cs4, cs5] :: Tx (Postgres 'PG17) 'ReadWrite ()
+          bulkRes <- runTx p ReadWrite bulkTx
+          bulkRes `shouldBe` Right ()
+
+          let qAll = each accountSchema
+          allRows <- selectRows p qAll
+          case allRows of
+            Left err -> expectationFailure ("Failed to select rows: " ++ show err)
+            Right rs -> length rs `shouldBe` 5
+
+          -- Delete a record using delete
+          let delTx = delete accountSchema (Id 4) :: Tx (Postgres 'PG17) 'ReadWrite ()
+          delRes <- runTx p ReadWrite delTx
+          delRes `shouldBe` Right ()
+
+          allRowsAfterDel <- selectRows p qAll
+          case allRowsAfterDel of
+            Left err -> expectationFailure ("Failed to select rows after delete: " ++ show err)
+            Right rs -> length rs `shouldBe` 4
+
+  it
+    "User Story 16 Acceptance Criterion: executes insertMany and delete against live PostgreSQL with columnar array binding and UNNEST"
+    $ withTestPostgres
+    $ \p -> do
+      case poolActiveConnection p of
+        Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
+        Just _ -> do
+          _ <-
+            executeSql
+              p
+              "DROP TABLE IF EXISTS test_live_bulk_users CASCADE; \
+              \CREATE TABLE test_live_bulk_users ( \
+              \  id BIGINT PRIMARY KEY, \
+              \  email TEXT NOT NULL \
+              \);"
+
+          let cs1 = change @'InsertOp (SimpleUser (SetTo (toId 10)) (SetTo "u10@example.com"))
+              cs2 = change @'InsertOp (SimpleUser (SetTo (toId 20)) (SetTo "u20@example.com"))
+              cs3 = change @'InsertOp (SimpleUser (SetTo (toId 30)) (SetTo "u30@example.com"))
+              bulkTx = insertMany_ liveBulkSchema [cs1, cs2, cs3] :: Tx (Postgres 'PG17) 'ReadWrite ()
+          bulkRes <- runTx p ReadWrite bulkTx
+          bulkRes `shouldBe` Right ()
+
+          -- Verify 3 rows inserted
+          let qUsers = each liveBulkSchema
+          rowsRes <- selectRows p qUsers
+          case rowsRes of
+            Left err -> expectationFailure ("Failed to select live bulk users: " ++ show err)
+            Right rs -> length rs `shouldBe` 3
+
+          -- Delete record 20
+          let delTx = delete liveBulkSchema (toId 20) :: Tx (Postgres 'PG17) 'ReadWrite ()
+          delRes <- runTx p ReadWrite delTx
+          delRes `shouldBe` Right ()
+
+          rowsResAfter <- selectRows p qUsers
+          case rowsResAfter of
+            Left err -> expectationFailure ("Failed to select live bulk users after delete: " ++ show err)
+            Right rs -> do
+              length rs `shouldBe` 2
+              map (.id) rs `shouldBe` [toId 10, toId 30]
+
 -- -----------------------------------------------------------------------------
 -- User Story 12 Test Row Type & Codec
 -- -----------------------------------------------------------------------------
@@ -712,3 +787,62 @@ accountCodec =
 
 instance TableCodec AccountT where
   tableCodec = accountCodec
+
+instance BulkInsertable AccountT
+
+-- | 2-column HKD Table for User Story 16 acceptance test.
+data SimpleUserT (ctx :: Ctx) = SimpleUser
+  { id :: !(Col ctx (Id SimpleUserT Int64))
+  , email :: !(Col ctx Text)
+  }
+
+deriving instance Eq (SimpleUserT 'Result)
+deriving instance Show (SimpleUserT 'Result)
+deriving instance Eq (SimpleUserT 'Patch)
+deriving instance Show (SimpleUserT 'Patch)
+
+type SimpleUser = SimpleUserT 'Result
+
+liveBulkSchema :: TableSchema SimpleUserT
+liveBulkSchema =
+  tableSchema "test_live_bulk_users" $
+    SimpleUser
+      { id = primaryKey "id" "bigint"
+      , email = column "email" "text"
+      }
+
+instance Table SimpleUserT where
+  toTableExpr alias m =
+    SimpleUser
+      { id = colSpecExpr alias m.id
+      , email = colSpecExpr alias m.email
+      }
+  tableExprColumns u =
+    [ renderExpr u.id
+    , renderExpr u.email
+    ]
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.email
+    ]
+  tableColumnsMeta m =
+    [ (colName m.id, colSqlType m.id)
+    , (colName m.email, colSqlType m.email)
+    ]
+  patchEntries m p =
+    patchEntry m.id p.id
+      ++ patchEntry m.email p.email
+
+instance Projectable (SimpleUserT 'Expr) where
+  projectColumns = tableExprColumns
+
+instance BulkInsertable SimpleUserT
+
+simpleUserCodec :: Codec SimpleUser SimpleUser
+simpleUserCodec =
+  SimpleUser
+    <$> field (.id) (idCodec int64Codec)
+    <*> field (.email) textCodec
+
+instance TableCodec SimpleUserT where
+  tableCodec = simpleUserCodec

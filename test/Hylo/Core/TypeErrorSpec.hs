@@ -30,7 +30,14 @@ import Control.DeepSeq (NFData (..))
 import Data.Int (Int64)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import Hylo.Core.Context (Col, Ctx (..), PatchField (..))
+import Hylo.Core.Context
+  ( Col
+  , ColDef (..)
+  , Ctx (..)
+  , PatchField (..)
+  , colName
+  , colSqlType
+  )
 import Hylo.Core.Expr (QExpr (..), just, (==.))
 import Hylo.Core.Key (Id (..), toId)
 import Hylo.Core.Query
@@ -42,7 +49,16 @@ import Hylo.Core.Query
   , emptyChangeset
   , insert
   )
-import Hylo.Core.Table (TableSchema, column, primaryKey, tableSchema)
+import Hylo.Core.Table
+  ( Table (..)
+  , TableSchema
+  , colSpecExpr
+  , column
+  , eraseColDef
+  , patchEntry
+  , primaryKey
+  , tableSchema
+  )
 import Hylo.Core.TypeError
   ( AssertAcyclic (..)
   , AssertBackendCapability (..)
@@ -58,6 +74,7 @@ import Hylo.Core.TypeError
   , AssertValidForeignKey (..)
   , PGVersion (..)
   )
+import Hylo.SQL.AST (renderExpr)
 import Hylo.Test.ShouldNotTypecheck
 import Test.Hspec
 
@@ -75,6 +92,18 @@ instance NFData (DocumentT 'Result) where
 
 instance NFData (DocumentT 'Patch) where
   rnf (Document i t) = i `seq` t `seq` ()
+
+instance Table DocumentT where
+  toTableExpr alias (Document docId docTitle) =
+    Document (colSpecExpr alias docId) (colSpecExpr alias docTitle)
+  tableExprColumns (Document docId docTitle) =
+    [renderExpr docId, renderExpr docTitle]
+  tableColumnsMeta (Document docId docTitle) =
+    [(colName docId, colSqlType docId), (colName docTitle, colSqlType docTitle)]
+  tableColDefs (Document docId docTitle) =
+    [eraseColDef docId, eraseColDef docTitle]
+  patchEntries (Document docId docTitle) (Document pId pTitle) =
+    patchEntry docId pId ++ patchEntry docTitle pTitle
 
 -- | Test Table B: User entity
 data UserT (ctx :: Ctx) = User
