@@ -132,7 +132,7 @@ insertMany schema csFoldable =
                   st' =
                     st
                       { txStore = newStore
-                      , txOperations = txOperations st ++ [OpMutate sql]
+                      , txOperations = txOperations st ++ [OpMutate (sql, [])]
                       }
                   simulatedResults =
                     replicate

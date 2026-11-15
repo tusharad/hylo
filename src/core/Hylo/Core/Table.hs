@@ -1,55 +1,132 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 {- |
 Module      : Hylo.Core.Table
-Description : TableSchema and column definition combinators
+Description : TableSchema, Table typeclass, patch entries, and column definition combinators
 Copyright   : (c) 2026 Tushar Adhatrao
 License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
 -}
 module Hylo.Core.Table
-  ( TableSchema (..)
+  ( -- * Table Schema & Typeclass
+    TableSchema (..)
   , tableSchema
   , Table (..)
+
+    -- * Column Specification Combinators
   , colSpecExpr
   , column
   , nullableColumn
   , primaryKey
   , foreignKey
   , describeCol
+  , eraseColDef
   , ColDef (..)
   , ColSpec
   , LogicalType (..)
+
+    -- * Patch Value Descriptors & Field Formatting
+  , PatchVal (..)
+  , ToFieldValue (..)
+  , patchEntry
+  , diffField
   ) where
 
+import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as T
+import GHC.Generics (Generic)
 import Hylo.Core.Context
   ( ColDef (..)
   , ColSpec
   , Ctx (..)
   , LogicalType (..)
+  , PatchField (..)
   , castLogicalType
   , renderLogicalType
   )
 import Hylo.Core.Expr (QExpr, colExpr)
+import Hylo.Core.Key (Id (..))
 
--- | Class for HKD table schemas that can project their fields into 'Expr context.
+-- | Patch value representation for SQL synthesis and dirty field maps.
+data PatchVal
+  = ValSetTo !Text
+  | ValSetDefault
+  deriving (Eq, Show, Generic)
+
+-- | Class for HKD table schemas that can project their fields and metadata.
 class Table (table :: Ctx -> Type) where
   toTableExpr :: Text -> table 'Meta -> table 'Expr
   tableExprColumns :: table 'Expr -> [Text]
   tableExprColumns _ = []
   tableColumnsMeta :: table 'Meta -> [(Text, Text)]
   tableColumnsMeta _ = []
+  tableColDefs :: table 'Meta -> [ColDef ()]
+  tableColDefs _ = []
   diffTable :: table 'Result -> table 'Result -> table 'Patch
   diffTable _ _ = errorWithoutStackTrace "diffTable: not implemented for table"
+  patchEntries :: table 'Meta -> table 'Patch -> [(ColDef (), PatchVal)]
+  patchEntries _ _ = []
   dirtyFieldsTable :: table 'Patch -> Map Text Text
   dirtyFieldsTable _ = Map.empty
+
+-- | Erase the phantom type parameter of a column definition to '()'.
+eraseColDef :: ColDef a -> ColDef ()
+eraseColDef c = c {colLogicalType = castLogicalType (colLogicalType c)}
+
+-- | Construct a patch entry for a column definition and patch field.
+patchEntry :: (ToFieldValue a) => ColDef a -> PatchField a -> [(ColDef (), PatchVal)]
+patchEntry col = \case
+  SetTo v -> [(eraseColDef col, ValSetTo (toFieldValue v))]
+  SetDefault -> [(eraseColDef col, ValSetDefault)]
+  Unchanged -> []
+
+-- | Pure diff combinator for a single field comparison.
+diffField :: (Eq a) => a -> a -> PatchField a
+diffField old new
+  | old == new = Unchanged
+  | otherwise = SetTo new
+
+-- | Typeclass for formatting column values into textual representations.
+class ToFieldValue a where
+  toFieldValue :: a -> Text
+
+instance {-# OVERLAPPABLE #-} (Show a) => ToFieldValue a where
+  toFieldValue = T.pack . show
+
+instance {-# OVERLAPPING #-} ToFieldValue Text where
+  toFieldValue = id
+
+instance {-# OVERLAPPING #-} ToFieldValue String where
+  toFieldValue = T.pack
+
+instance {-# OVERLAPPING #-} ToFieldValue Int64 where
+  toFieldValue = T.pack . show
+
+instance {-# OVERLAPPING #-} ToFieldValue Int where
+  toFieldValue = T.pack . show
+
+instance {-# OVERLAPPING #-} ToFieldValue Bool where
+  toFieldValue = T.pack . show
+
+instance (ToFieldValue a) => ToFieldValue (Maybe a) where
+  toFieldValue Nothing = "NULL"
+  toFieldValue (Just a) = toFieldValue a
+
+instance (ToFieldValue a) => ToFieldValue (Id table a) where
+  toFieldValue (Id a) = toFieldValue a
 
 -- | Construct a typed SQL column expression for an alias and a column specification.
 colSpecExpr :: Text -> ColDef a -> QExpr a

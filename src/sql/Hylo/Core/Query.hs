@@ -133,8 +133,7 @@ import Hylo.SQL.AST
   , renderLockClause
   )
 import Hylo.SQL.Builder
-  ( BoundParam (..)
-  , CompiledQuery (..)
+  ( CompiledQuery (..)
   , Dialect (..)
   , compileQuery
   , previewQuery
@@ -167,7 +166,7 @@ insert schema cs =
               let st' =
                     st
                       { txStore = if key /= "" then (tName, key) : txStore st else txStore st
-                      , txOperations = txOperations st ++ [OpMutate ("INSERT INTO " <> tName)]
+                      , txOperations = txOperations st ++ [OpMutate ("INSERT INTO " <> tName, [])]
                       }
                in (Right (errorWithoutStackTrace "insert: simulated entity hydration"), st')
 
@@ -181,7 +180,7 @@ update ::
 update schema _ =
   writableDict (Proxy :: Proxy mode) `seq`
     TxAction $ \st ->
-      let st' = st {txOperations = txOperations st ++ [OpMutate ("UPDATE " <> tableName schema)]}
+      let st' = st {txOperations = txOperations st ++ [OpMutate ("UPDATE " <> tableName schema, [])]}
        in (Right (errorWithoutStackTrace "update: simulated entity hydration"), st')
 
 -- | Statically guarded delete operation. Fails with [Hylo Error E005] in ReadOnly mode.
@@ -194,7 +193,7 @@ delete ::
 delete schema _ =
   writableDict (Proxy :: Proxy mode) `seq`
     TxAction $ \st ->
-      let st' = st {txOperations = txOperations st ++ [OpMutate ("DELETE FROM " <> tableName schema)]}
+      let st' = st {txOperations = txOperations st ++ [OpMutate ("DELETE FROM " <> tableName schema, [])]}
        in (Right (), st')
 
 --------------------------------------------------------------------------------

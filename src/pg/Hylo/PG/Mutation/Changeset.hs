@@ -7,9 +7,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 {- |
@@ -34,8 +32,6 @@ module Hylo.PG.Mutation.Changeset
 
     -- * Patch Value Descriptors
   , PatchVal (..)
-  , GPatchEntries (..)
-  , GTableMeta (..)
   , findPrimaryKeyCol
 
     -- * Parameterized SQL Generation
@@ -66,30 +62,21 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.Generics
-  ( C1
-  , D1
-  , Generic (..)
-  , K1 (..)
-  , M1 (..)
-  , Meta (..)
-  , Rep
-  , S1
-  , U1 (..)
-  , (:*:) (..)
-  )
-import GHC.TypeLits (KnownSymbol, symbolVal)
+import GHC.Generics (Generic)
 import Hylo.Backend.Capability (Postgres)
 import Hylo.Core.Changeset
   ( Changeset (..)
   , FieldError (..)
-  , PatchField (..)
-  , ToFieldValue (..)
   )
 import Hylo.Core.Context (ColDef (..), Ctx (..))
-import Hylo.Core.Table (TableSchema (..))
+import Hylo.Core.Table
+  ( PatchVal (..)
+  , Table (..)
+  , TableSchema (..)
+  )
 import Hylo.Core.Transaction
-  ( Tx (..)
+  ( BoundParam (..)
+  , Tx (..)
   , TxError (..)
   , TxOp (..)
   , TxState (..)
@@ -105,8 +92,7 @@ import Hylo.PG.Error.Translation
   , translateChangesetDbError
   )
 import Hylo.SQL.Builder
-  ( BoundParam (..)
-  , Dialect (PostgresDialect)
+  ( Dialect (PostgresDialect)
   , inferParamType
   , quoteIdentifier
   )
@@ -151,67 +137,13 @@ decodeReturningRow ::
 decodeReturningRow = runBinaryDecoder
 
 --------------------------------------------------------------------------------
--- 3. Patch Value Descriptors & Generic Traversals
+-- 3. Primary Key Resolution
 --------------------------------------------------------------------------------
 
--- | Patch value representation for SQL synthesis.
-data PatchVal
-  = ValSetTo !Text
-  | ValSetDefault
-  deriving (Eq, Show, Generic)
-
-instance NFData PatchVal
-
--- | Generic extraction of modified patch fields from HKD 'Patch records.
-class GPatchEntries f where
-  gPatchEntries :: f p -> [(Text, PatchVal)]
-
-instance (GPatchEntries f) => GPatchEntries (D1 c f) where
-  gPatchEntries (M1 x) = gPatchEntries x
-
-instance (GPatchEntries f) => GPatchEntries (C1 c f) where
-  gPatchEntries (M1 x) = gPatchEntries x
-
-instance (GPatchEntries f1, GPatchEntries f2) => GPatchEntries (f1 :*: f2) where
-  gPatchEntries (a :*: b) = gPatchEntries a ++ gPatchEntries b
-
-instance
-  (KnownSymbol s, ToFieldValue a) =>
-  GPatchEntries (S1 ('MetaSel ('Just s) u ss ds) (K1 i (PatchField a)))
-  where
-  gPatchEntries (M1 (K1 (SetTo a))) = [(T.pack (symbolVal (Proxy @s)), ValSetTo (toFieldValue a))]
-  gPatchEntries (M1 (K1 SetDefault)) = [(T.pack (symbolVal (Proxy @s)), ValSetDefault)]
-  gPatchEntries (M1 (K1 Unchanged)) = []
-
-instance GPatchEntries U1 where
-  gPatchEntries U1 = []
-
--- | Generic extraction of column metadata from HKD 'Meta records.
-class GTableMeta f where
-  gTableMeta :: f p -> [(Text, Bool, Text)] -- (colName, isPrimaryKey, sqlType)
-
-instance (GTableMeta f) => GTableMeta (D1 c f) where
-  gTableMeta (M1 x) = gTableMeta x
-
-instance (GTableMeta f) => GTableMeta (C1 c f) where
-  gTableMeta (M1 x) = gTableMeta x
-
-instance (GTableMeta f1, GTableMeta f2) => GTableMeta (f1 :*: f2) where
-  gTableMeta (a :*: b) = gTableMeta a ++ gTableMeta b
-
-instance GTableMeta (S1 m (K1 i (ColDef a))) where
-  gTableMeta (M1 (K1 def)) = [(colName def, colIsPrimaryKey def, colSqlType def)]
-
-instance GTableMeta U1 where
-  gTableMeta U1 = []
-
 -- | Discover the primary key column name for a schema. Defaults to "id" if not found.
-findPrimaryKeyCol ::
-  (Generic (table 'Meta), GTableMeta (Rep (table 'Meta))) =>
-  TableSchema table ->
-  Text
+findPrimaryKeyCol :: (Table table) => TableSchema table -> Text
 findPrimaryKeyCol schema =
-  case [c | (c, isPk, _) <- gTableMeta (from (tableMeta schema)), isPk] of
+  case [colName c | c <- tableColDefs (tableMeta schema), colIsPrimaryKey c] of
     (pk : _) -> pk
     [] -> "id"
 
@@ -223,34 +155,31 @@ findPrimaryKeyCol schema =
 
 Omits 'Unchanged' fields entirely. Binds parameters for 'SetTo' values and emits
 'DEFAULT' for 'SetDefault'. Appends the primary key predicate and ends with 'RETURNING *'.
+Uses table metadata (colName) without GHC.Generics.
 -}
 renderUpdateChangesetSQL ::
   forall table op.
-  ( Generic (table 'Patch)
-  , GPatchEntries (Rep (table 'Patch))
-  , Generic (table 'Meta)
-  , GTableMeta (Rep (table 'Meta))
-  ) =>
+  (Table table) =>
   TableSchema table ->
   Changeset table op ->
   (Text, [BoundParam])
 renderUpdateChangesetSQL schema cs =
   let tbl = quoteIdentifier PostgresDialect (tableName schema)
       pkCol = findPrimaryKeyCol schema
-      entries = gPatchEntries (from (changesetPatch cs))
+      entries = patchEntries (tableMeta schema) (changesetPatch cs)
       -- Exclude primary key from SET clause (it belongs in WHERE clause)
-      setEntries = filter (\(c, _) -> c /= pkCol) entries
+      setEntries = filter (\(c, _) -> colName c /= pkCol) entries
       pkVal =
         if changesetKey cs /= "" && changesetKey cs /= tableName schema
           then changesetKey cs
-          else case lookup pkCol entries of
-            Just (ValSetTo v) -> v
-            _ -> "1"
+          else case [v | (c, ValSetTo v) <- entries, colName c == pkCol] of
+            (v : _) -> v
+            [] -> "1"
 
       -- Fold SET entries with monotonically increasing parameter index
       buildSetClauses [] idx = ([], [], idx)
-      buildSetClauses ((col, val) : rest) idx =
-        let qCol = quoteIdentifier PostgresDialect col
+      buildSetClauses ((colDef, val) : rest) idx =
+        let qCol = quoteIdentifier PostgresDialect (colName colDef)
          in case val of
               ValSetTo valText ->
                 let clause = qCol <> " = $" <> T.pack (show idx)
@@ -278,23 +207,21 @@ renderUpdateChangesetSQL schema cs =
 {- | Render a parameterized INSERT SQL statement for non-Unchanged fields.
 
 Binds parameters for 'SetTo' values and emits 'DEFAULT' for 'SetDefault'.
-Ends with 'RETURNING *'.
+Ends with 'RETURNING *'. Uses table metadata (colName) without GHC.Generics.
 -}
 renderInsertChangesetSQL ::
   forall table op.
-  ( Generic (table 'Patch)
-  , GPatchEntries (Rep (table 'Patch))
-  ) =>
+  (Table table) =>
   TableSchema table ->
   Changeset table op ->
   (Text, [BoundParam])
 renderInsertChangesetSQL schema cs =
   let tbl = quoteIdentifier PostgresDialect (tableName schema)
-      entries = gPatchEntries (from (changesetPatch cs))
+      entries = patchEntries (tableMeta schema) (changesetPatch cs)
 
       buildInsertClauses [] _ = ([], [], [])
-      buildInsertClauses ((col, val) : rest) idx =
-        let qCol = quoteIdentifier PostgresDialect col
+      buildInsertClauses ((colDef, val) : rest) idx =
+        let qCol = quoteIdentifier PostgresDialect (colName colDef)
          in case val of
               ValSetTo valText ->
                 let valExpr = "$" <> T.pack (show idx)
@@ -327,15 +254,13 @@ renderInsertChangesetSQL schema cs =
 {- | Statically guarded parameterized INSERT using the canonical 'TableCodec'.
 
 Fails at compile-time with [Hylo Error E005] if evaluated within a 'ReadOnly' transaction.
+Requires zero GHC.Generics constraints.
 -}
 insertChangeset ::
   forall table v (mode :: TxMode) op.
   ( AssertWritable mode
   , TableCodec table
-  , Generic (table 'Patch)
-  , GPatchEntries (Rep (table 'Patch))
-  , Generic (table 'Meta)
-  , GTableMeta (Rep (table 'Meta))
+  , Table table
   ) =>
   TableSchema table ->
   Changeset table op ->
@@ -346,10 +271,7 @@ insertChangeset schema = insertChangesetWith schema tableCodec
 insertChangesetWith ::
   forall table v (mode :: TxMode) op.
   ( AssertWritable mode
-  , Generic (table 'Patch)
-  , GPatchEntries (Rep (table 'Patch))
-  , Generic (table 'Meta)
-  , GTableMeta (Rep (table 'Meta))
+  , Table table
   ) =>
   TableSchema table ->
   RowCodec (table 'Result) (table 'Result) ->
@@ -361,10 +283,7 @@ insertChangesetWith schema codec = insertChangesetWithRow schema codec BS.empty
 insertChangesetWithRow ::
   forall table v (mode :: TxMode) op.
   ( AssertWritable mode
-  , Generic (table 'Patch)
-  , GPatchEntries (Rep (table 'Patch))
-  , Generic (table 'Meta)
-  , GTableMeta (Rep (table 'Meta))
+  , Table table
   ) =>
   TableSchema table ->
   RowCodec (table 'Result) (table 'Result) ->
@@ -386,13 +305,13 @@ insertChangesetWithRow schema codec wireBytes cs =
             Just fe ->
               (Right (Left (singleChangesetError fe)), st)
             Nothing ->
-              let (sqlText, _params) = renderInsertChangesetSQL schema cs
+              let (sqlText, params) = renderInsertChangesetSQL schema cs
                   key = changesetKey cs
                   tName = tableName schema
                   newStore = if key /= "" then (tName, key) : txStore st else txStore st
                   st' =
                     st
-                      { txOperations = txOperations st ++ [OpMutate sqlText]
+                      { txOperations = txOperations st ++ [OpMutate (sqlText, params)]
                       , txStore = newStore
                       }
                in if not (BS.null wireBytes)
@@ -413,15 +332,13 @@ insertChangesetWithRow schema codec wireBytes cs =
 {- | Statically guarded parameterized partial UPDATE using the canonical 'TableCodec'.
 
 Fails at compile-time with [Hylo Error E005] if evaluated within a 'ReadOnly' transaction.
+Requires zero GHC.Generics constraints.
 -}
 updateChangeset ::
   forall table v (mode :: TxMode) op.
   ( AssertWritable mode
   , TableCodec table
-  , Generic (table 'Patch)
-  , GPatchEntries (Rep (table 'Patch))
-  , Generic (table 'Meta)
-  , GTableMeta (Rep (table 'Meta))
+  , Table table
   ) =>
   TableSchema table ->
   Changeset table op ->
@@ -432,10 +349,7 @@ updateChangeset schema = updateChangesetWith schema tableCodec
 updateChangesetWith ::
   forall table v (mode :: TxMode) op.
   ( AssertWritable mode
-  , Generic (table 'Patch)
-  , GPatchEntries (Rep (table 'Patch))
-  , Generic (table 'Meta)
-  , GTableMeta (Rep (table 'Meta))
+  , Table table
   ) =>
   TableSchema table ->
   RowCodec (table 'Result) (table 'Result) ->
@@ -447,10 +361,7 @@ updateChangesetWith schema codec = updateChangesetWithRow schema codec BS.empty
 updateChangesetWithRow ::
   forall table v (mode :: TxMode) op.
   ( AssertWritable mode
-  , Generic (table 'Patch)
-  , GPatchEntries (Rep (table 'Patch))
-  , Generic (table 'Meta)
-  , GTableMeta (Rep (table 'Meta))
+  , Table table
   ) =>
   TableSchema table ->
   RowCodec (table 'Result) (table 'Result) ->
@@ -472,8 +383,8 @@ updateChangesetWithRow schema codec wireBytes cs =
             Just fe ->
               (Right (Left (singleChangesetError fe)), st)
             Nothing ->
-              let (sqlText, _params) = renderUpdateChangesetSQL schema cs
-                  st' = st {txOperations = txOperations st ++ [OpMutate sqlText]}
+              let (sqlText, params) = renderUpdateChangesetSQL schema cs
+                  st' = st {txOperations = txOperations st ++ [OpMutate (sqlText, params)]}
                in if not (BS.null wireBytes)
                     then case decodeReturningRow codec wireBytes of
                       Left decodeErr ->
@@ -528,7 +439,7 @@ translateTxConstraintViolation schema cs = \case
 
 -- | Internal helper to check simulated constraint violations during pure transaction evaluation.
 checkSimulatedConstraint ::
-  (Generic (table 'Meta), GTableMeta (Rep (table 'Meta))) =>
+  (Table table) =>
   TableSchema table ->
   Changeset table op ->
   TxState ->

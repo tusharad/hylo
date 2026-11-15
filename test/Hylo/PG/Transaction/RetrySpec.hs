@@ -64,6 +64,7 @@ import Hylo.PG.Transaction.Retry
   , simulateDeadlocks
   , simulateSerializationFailureOnce
   , simulateSerializationFailures
+  , simulateWriteConflictOnce
   , pattern TxSerializationFailure
   )
 import Test.Hspec
@@ -272,3 +273,33 @@ spec = describe "Epic 12: Automatic Retry Engine & Commit Hooks" $ do
           validTx = select (each accountTable)
       res <- runReadOnlyTx cluster validTx
       isRight res `shouldBe` True
+
+    it
+      "User Story 8 Acceptance Criterion 2: runTxWithRetry executes BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE READ WRITE and replays on SQLSTATE 40001 or 40P01"
+      $ do
+        renderBeginTransaction Serializable ReadWrite
+          `shouldBe` "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE READ WRITE"
+
+        -- Replay on SQLSTATE 40001 (serialization failure)
+        counter40001 <- newTVarIO (0 :: Int)
+        let tx40001 :: Tx Postgres 'ReadWrite Text
+            tx40001 = do
+              onCommit (atomically $ modifyTVar' counter40001 (+ 1))
+              simulateWriteConflictOnce
+              pure "committed_40001"
+        res40001 <- runTxWithRetry (fastRetryPolicy 3) pool Serializable tx40001
+        res40001 `shouldBe` Right "committed_40001"
+        c1 <- readTVarIO counter40001
+        c1 `shouldBe` 1
+
+        -- Replay on SQLSTATE 40P01 (deadlock detected)
+        counter40P01 <- newTVarIO (0 :: Int)
+        let tx40P01 :: Tx Postgres 'ReadWrite Text
+            tx40P01 = do
+              onCommit (atomically $ modifyTVar' counter40P01 (+ 1))
+              simulateDeadlockOnce
+              pure "committed_40P01"
+        res40P01 <- runTxWithRetry (fastRetryPolicy 3) pool Serializable tx40P01
+        res40P01 `shouldBe` Right "committed_40P01"
+        c2 <- readTVarIO counter40P01
+        c2 `shouldBe` 1

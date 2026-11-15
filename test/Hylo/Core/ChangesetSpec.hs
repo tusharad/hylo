@@ -56,23 +56,6 @@ deriving instance Show (AccountProfileT 'Result)
 deriving instance Eq (AccountProfileT 'Patch)
 deriving instance Show (AccountProfileT 'Patch)
 
-instance Table AccountProfileT where
-  toTableExpr alias meta =
-    AccountProfile
-      { id = colSpecExpr alias meta.id
-      , username = colSpecExpr alias meta.username
-      , email = colSpecExpr alias meta.email
-      , age = colSpecExpr alias meta.age
-      , bio = colSpecExpr alias meta.bio
-      , country = colSpecExpr alias meta.country
-      , phone = colSpecExpr alias meta.phone
-      , role = colSpecExpr alias meta.role
-      , score = colSpecExpr alias meta.score
-      , active = colSpecExpr alias meta.active
-      }
-  diffTable = genericDiff
-  dirtyFieldsTable = genericDirtyMap
-
 accountProfileSchema :: TableSchema AccountProfileT
 accountProfileSchema =
   tableSchema "account_profiles" $
@@ -88,6 +71,64 @@ accountProfileSchema =
       , score = column "score" "bigint"
       , active = column "active" "boolean"
       }
+
+instance Table AccountProfileT where
+  toTableExpr alias meta =
+    AccountProfile
+      { id = colSpecExpr alias meta.id
+      , username = colSpecExpr alias meta.username
+      , email = colSpecExpr alias meta.email
+      , age = colSpecExpr alias meta.age
+      , bio = colSpecExpr alias meta.bio
+      , country = colSpecExpr alias meta.country
+      , phone = colSpecExpr alias meta.phone
+      , role = colSpecExpr alias meta.role
+      , score = colSpecExpr alias meta.score
+      , active = colSpecExpr alias meta.active
+      }
+  diffTable old new =
+    AccountProfile
+      { id = diffField old.id new.id
+      , username = diffField old.username new.username
+      , email = diffField old.email new.email
+      , age = diffField old.age new.age
+      , bio = diffField old.bio new.bio
+      , country = diffField old.country new.country
+      , phone = diffField old.phone new.phone
+      , role = diffField old.role new.role
+      , score = diffField old.score new.score
+      , active = diffField old.active new.active
+      }
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.username
+    , eraseColDef m.email
+    , eraseColDef m.age
+    , eraseColDef m.bio
+    , eraseColDef m.country
+    , eraseColDef m.phone
+    , eraseColDef m.role
+    , eraseColDef m.score
+    , eraseColDef m.active
+    ]
+  patchEntries meta patch =
+    concat
+      [ patchEntry meta.id patch.id
+      , patchEntry meta.username patch.username
+      , patchEntry meta.email patch.email
+      , patchEntry meta.age patch.age
+      , patchEntry meta.bio patch.bio
+      , patchEntry meta.country patch.country
+      , patchEntry meta.phone patch.phone
+      , patchEntry meta.role patch.role
+      , patchEntry meta.score patch.score
+      , patchEntry meta.active patch.active
+      ]
+  dirtyFieldsTable patch =
+    Map.fromList
+      [ (colName c, case v of ValSetTo t -> t; ValSetDefault -> "DEFAULT")
+      | (c, v) <- patchEntries (tableMeta accountProfileSchema) patch
+      ]
 
 sampleAccount1 :: AccountProfileT 'Result
 sampleAccount1 =
