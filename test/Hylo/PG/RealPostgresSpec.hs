@@ -1,3 +1,4 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DuplicateRecordFields #-}
@@ -48,6 +49,7 @@ import Hylo.Core
   , ColDef (..)
   , Ctx (..)
   , Id (..)
+  , NullableTable (..)
   , PatchField (..)
   , Table (..)
   , TableSchema (..)
@@ -55,6 +57,7 @@ import Hylo.Core
   , column
   , diffField
   , eraseColDef
+  , foreignKey
   , patchEntry
   , primaryKey
   , tableSchema
@@ -62,8 +65,8 @@ import Hylo.Core
   )
 import Hylo.Core.Changeset (OpKind (..), change)
 import Hylo.Core.Codec (Codec (..), field)
-import Hylo.Core.Expr (lit, (==.))
-import Hylo.Core.Query (delete, each, where_)
+import Hylo.Core.Expr (just, lit, (==.))
+import Hylo.Core.Query (Query, delete, each, leftJoin, where_)
 import Hylo.Core.Transaction
   ( BoundParam (..)
   , Tx (..)
@@ -80,11 +83,13 @@ import Hylo.PG.Codec.Binary
   , embeddingCodec
   , idCodec
   , int64Codec
+  , jsonField
   , jsonbCodec
   , textCodec
   , utcTimeCodec
   , uuidCodec
   )
+import Hylo.PG.Compiler.Lateral (NestedList (..), many)
 import Hylo.PG.Connection
   ( Pool (..)
   , executePreparedQuery
@@ -750,6 +755,86 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
           ftsRes <- executeSession p (Sess.statement "PostgreSQL ACID" ftsStmt)
           ftsRes `shouldBe` Right [1]
 
+  it
+    "User Story 1 Acceptance Criterion: executes activeUsersWithRecentDocs hydrating (User, Maybe Profile, [Document]) in a single trip"
+    $ withTestPostgres
+    $ \p -> do
+      case poolActiveConnection p of
+        Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
+        Just _ -> do
+          _ <-
+            executeSql
+              p
+              "DROP TABLE IF EXISTS test_live_story1_documents CASCADE;\
+              \DROP TABLE IF EXISTS test_live_story1_profiles CASCADE;\
+              \DROP TABLE IF EXISTS test_live_story1_users CASCADE;\
+              \CREATE TABLE test_live_story1_users (\
+              \  id BIGINT PRIMARY KEY,\
+              \  org_id BIGINT NOT NULL,\
+              \  name TEXT NOT NULL\
+              \);\
+              \CREATE TABLE test_live_story1_profiles (\
+              \  id BIGINT PRIMARY KEY,\
+              \  user_id BIGINT NOT NULL REFERENCES test_live_story1_users(id),\
+              \  bio TEXT NOT NULL\
+              \);\
+              \CREATE TABLE test_live_story1_documents (\
+              \  id BIGINT PRIMARY KEY,\
+              \  user_id BIGINT NOT NULL REFERENCES test_live_story1_users(id),\
+              \  title TEXT NOT NULL\
+              \);"
+
+          _ <-
+            executeSql
+              p
+              "INSERT INTO test_live_story1_users (id, org_id, name) VALUES\
+              \  (1, 42, 'Alice'),\
+              \  (2, 42, 'Bob'),\
+              \  (3, 999, 'Eve');\
+              \INSERT INTO test_live_story1_profiles (id, user_id, bio) VALUES\
+              \  (101, 1, 'Haskell Architect');\
+              \INSERT INTO test_live_story1_documents (id, user_id, title) VALUES\
+              \  (201, 1, 'Architecture Spec'),\
+              \  (202, 1, 'Migration Guide');"
+
+          let activeUsersWithRecentDocs ::
+                Int64 ->
+                Query
+                  (Postgres 'PG17)
+                  (Story1UserT 'Expr, NullableTable (Story1ProfileT 'Expr), NestedList (Story1DocT 'Expr))
+              activeUsersWithRecentDocs targetOrg = do
+                u <- each story1UserSchema
+                where_ (u.orgId ==. lit targetOrg)
+                prof <- leftJoin story1ProfileSchema (\pr -> pr.userId ==. just u.id)
+                docs <- many $ do
+                  d <- each story1DocSchema
+                  where_ (d.userId ==. u.id)
+                  pure d
+                pure (u, prof, docs)
+
+          res <- selectRows p (activeUsersWithRecentDocs (42 :: Int64))
+          case res of
+            Left err -> expectationFailure ("selectRows failed: " ++ show err)
+            Right rows -> do
+              length rows `shouldBe` 2
+              case rows of
+                [ (u1, mProf1, docs1)
+                  , (u2, mProf2, docs2)
+                  ] -> do
+                    u1.id `shouldBe` Id 1
+                    u1.name `shouldBe` "Alice"
+                    case mProf1 of
+                      Just pr1 -> pr1.bio `shouldBe` "Haskell Architect"
+                      Nothing -> expectationFailure "Expected Just profile for Alice"
+                    length docs1 `shouldBe` 2
+                    map (.title) docs1 `shouldBe` ["Architecture Spec", "Migration Guide"]
+
+                    u2.id `shouldBe` Id 2
+                    u2.name `shouldBe` "Bob"
+                    mProf2 `shouldBe` Nothing
+                    docs2 `shouldBe` []
+                _ -> expectationFailure ("Unexpected rows returned: " ++ show (length rows))
+
 -- -----------------------------------------------------------------------------
 -- User Story 12 Test Row Type & Codec
 -- -----------------------------------------------------------------------------
@@ -918,3 +1003,163 @@ simpleUserCodec =
 
 instance TableCodec SimpleUserT where
   tableCodec = simpleUserCodec
+
+-- -----------------------------------------------------------------------------
+-- User Story 1 Test Tables & Codecs
+-- -----------------------------------------------------------------------------
+
+data Story1UserT (ctx :: Ctx) = Story1User
+  { id :: !(Col ctx (Id Story1UserT Int64))
+  , orgId :: !(Col ctx Int64)
+  , name :: !(Col ctx Text)
+  }
+  deriving (Generic)
+
+deriving instance Eq (Story1UserT 'Result)
+deriving instance Show (Story1UserT 'Result)
+
+story1UserSchema :: TableSchema Story1UserT
+story1UserSchema =
+  tableSchema "test_live_story1_users" $
+    Story1User
+      { id = primaryKey "id" "bigint"
+      , orgId = column "org_id" "bigint"
+      , name = column "name" "text"
+      }
+
+instance Table Story1UserT where
+  toTableExpr alias m =
+    Story1User
+      { id = colSpecExpr alias m.id
+      , orgId = colSpecExpr alias m.orgId
+      , name = colSpecExpr alias m.name
+      }
+  tableExprColumns u =
+    [ renderExpr u.id
+    , renderExpr u.orgId
+    , renderExpr u.name
+    ]
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.orgId
+    , eraseColDef m.name
+    ]
+
+instance Projectable (Story1UserT 'Expr) where
+  projectColumns = tableExprColumns
+
+instance TableCodec Story1UserT where
+  tableCodec =
+    Story1User
+      <$> field (.id) (idCodec int64Codec)
+      <*> field (.orgId) int64Codec
+      <*> field (.name) textCodec
+  tableJsonDecoder =
+    Story1User
+      <$> jsonField
+      <*> jsonField
+      <*> jsonField
+
+data Story1ProfileT (ctx :: Ctx) = Story1Profile
+  { id :: !(Col ctx (Id Story1ProfileT Int64))
+  , userId :: !(Col ctx (Id Story1UserT Int64))
+  , bio :: !(Col ctx Text)
+  }
+  deriving (Generic)
+
+deriving instance Eq (Story1ProfileT 'Result)
+deriving instance Show (Story1ProfileT 'Result)
+
+story1ProfileSchema :: TableSchema Story1ProfileT
+story1ProfileSchema =
+  tableSchema "test_live_story1_profiles" $
+    Story1Profile
+      { id = primaryKey "id" "bigint"
+      , userId = foreignKey "user_id" "bigint"
+      , bio = column "bio" "text"
+      }
+
+instance Table Story1ProfileT where
+  toTableExpr alias m =
+    Story1Profile
+      { id = colSpecExpr alias m.id
+      , userId = colSpecExpr alias m.userId
+      , bio = colSpecExpr alias m.bio
+      }
+  tableExprColumns p =
+    [ renderExpr p.id
+    , renderExpr p.userId
+    , renderExpr p.bio
+    ]
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.userId
+    , eraseColDef m.bio
+    ]
+
+instance Projectable (Story1ProfileT 'Expr) where
+  projectColumns = tableExprColumns
+
+instance TableCodec Story1ProfileT where
+  tableCodec =
+    Story1Profile
+      <$> field (.id) (idCodec int64Codec)
+      <*> field (.userId) (idCodec int64Codec)
+      <*> field (.bio) textCodec
+  tableJsonDecoder =
+    Story1Profile
+      <$> jsonField
+      <*> jsonField
+      <*> jsonField
+
+data Story1DocT (ctx :: Ctx) = Story1Doc
+  { id :: !(Col ctx (Id Story1DocT Int64))
+  , userId :: !(Col ctx (Id Story1UserT Int64))
+  , title :: !(Col ctx Text)
+  }
+  deriving (Generic)
+
+deriving instance Eq (Story1DocT 'Result)
+deriving instance Show (Story1DocT 'Result)
+
+story1DocSchema :: TableSchema Story1DocT
+story1DocSchema =
+  tableSchema "test_live_story1_documents" $
+    Story1Doc
+      { id = primaryKey "id" "bigint"
+      , userId = foreignKey "user_id" "bigint"
+      , title = column "title" "text"
+      }
+
+instance Table Story1DocT where
+  toTableExpr alias m =
+    Story1Doc
+      { id = colSpecExpr alias m.id
+      , userId = colSpecExpr alias m.userId
+      , title = colSpecExpr alias m.title
+      }
+  tableExprColumns d =
+    [ renderExpr d.id
+    , renderExpr d.userId
+    , renderExpr d.title
+    ]
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.userId
+    , eraseColDef m.title
+    ]
+
+instance Projectable (Story1DocT 'Expr) where
+  projectColumns = tableExprColumns
+
+instance TableCodec Story1DocT where
+  tableCodec =
+    Story1Doc
+      <$> field (.id) (idCodec int64Codec)
+      <*> field (.userId) (idCodec int64Codec)
+      <*> field (.title) textCodec
+  tableJsonDecoder =
+    Story1Doc
+      <$> jsonField
+      <*> jsonField
+      <*> jsonField

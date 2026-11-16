@@ -77,7 +77,6 @@ module Hylo.Core.Query
   , renderUpdateChangesetSQL
 
     -- * Statically Guarded Mutations
-  , select
   , insert
   , update
   , delete
@@ -168,12 +167,6 @@ import Hylo.SQL.Builder
 import Hylo.SQL.Query.Aggregate
 import Hylo.SQL.Query.Recursive
 import Hylo.SQL.Query.Window
-
--- | Monadic query execution combinator within transactions.
-select :: forall k (db :: k) a (mode :: TxMode). Query db a -> Tx db mode a
-select q = TxAction $ \st ->
-  let (res, _qState) = runQuery q initialQueryState
-   in (Right res, st)
 
 --------------------------------------------------------------------------------
 -- Parameterized Mutation SQL Generation

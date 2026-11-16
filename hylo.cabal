@@ -135,6 +135,7 @@ library hylo-pg
     , hasql-transaction >=1.1 && <2
     , hylo:hylo-core
     , hylo:hylo-sql
+    , scientific >=0.3 && <0.4
     , stm >=2.5 && <3
     , text >=1.2 && <3
     , time >=1.9 && <2
@@ -259,6 +260,7 @@ test-suite hylo-test
       Hylo.PG.RangeSpec
       Hylo.PG.RealPostgresSpec
       Hylo.PG.Search.HybridSpec
+      Hylo.PG.SelectableSpec
       Hylo.PG.Streaming.CursorSpec
       Hylo.PG.Transaction.RetrySpec
       Hylo.PG.VectorSpec

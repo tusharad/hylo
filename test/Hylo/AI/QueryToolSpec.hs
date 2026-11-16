@@ -3,6 +3,7 @@
 {-# LANGUAGE ExtendedDefaultRules #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
@@ -50,9 +51,19 @@ import Hylo.Core.Table
 import Hylo.Core.Transaction
   ( Tx
   , TxMode (..)
+  , TxOp (..)
   , TxState (..)
   , executeTx
   , initialTxState
+  )
+import Hylo.PG.Codec.Binary
+  ( TableCodec (..)
+  , field
+  , idCodec
+  , int64Codec
+  , jsonField
+  , textCodec
+  , utcTimeCodec
   )
 import Hylo.PG.Compiler.SQL (compilePostgresSQL, previewPostgresSQL)
 import Hylo.SQL.AST (Projectable (..), renderExpr)
@@ -95,6 +106,10 @@ instance Table OrgT where
 instance Projectable (OrgT 'Expr) where
   projectColumns = tableExprColumns
 
+instance TableCodec OrgT where
+  tableCodec = Org <$> field (.id) (idCodec int64Codec) <*> field (.name) textCodec
+  tableJsonDecoder = Org <$> jsonField <*> jsonField
+
 instance Table DocumentT where
   toTableExpr alias m =
     Document
@@ -123,6 +138,22 @@ instance Table DocumentT where
 
 instance Projectable (DocumentT 'Expr) where
   projectColumns = tableExprColumns
+
+instance TableCodec DocumentT where
+  tableCodec =
+    Document
+      <$> field (.id) (idCodec int64Codec)
+      <*> field (.createdAt) utcTimeCodec
+      <*> field (.orgId) (idCodec int64Codec)
+      <*> field (.title) textCodec
+      <*> field (.salary) int64Codec
+  tableJsonDecoder =
+    Document
+      <$> jsonField
+      <*> jsonField
+      <*> jsonField
+      <*> jsonField
+      <*> jsonField
 
 docTable :: TableSchema DocumentT
 docTable =
@@ -269,7 +300,7 @@ spec = describe "Epic 17: Sandboxed Structured Agent Query Compiler" $ do
           (res, finalSt) = executeTx txAction initialTxState
       case res of
         Right (Right _) -> do
-          txOperations finalSt `shouldBe` []
+          all (\case OpMutate _ -> False; _ -> True) (txOperations finalSt) `shouldBe` True
           txStore finalSt `shouldBe` []
         _ -> expectationFailure "Execution should succeed in ReadOnly"
 

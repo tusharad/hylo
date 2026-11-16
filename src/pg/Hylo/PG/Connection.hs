@@ -29,10 +29,14 @@ module Hylo.PG.Connection
   , buildParamsEncoder
   , mkPreparedStatement
   , mkPreparedQueryStatement
+  , mkPreparedQueryStatementWithDecoder
   , assembleRowBytes
   , rawColumnDecoder
   , decodeRowWithCodec
+  , decodeRowWithBinaryDecoder
   , executePreparedQuery
+  , executePreparedQueryWithDecoder
+  , select
   , selectRows
   , selectRowsWithSchema
   , selectRowsTx
@@ -77,7 +81,13 @@ import qualified Hasql.Encoders as Enc
 import qualified Hasql.Session as Sess
 import qualified Hasql.Statement as Stmt
 import Hylo.Backend.Capability (Postgres)
-import Hylo.Core.Codec (RowCodec, runBinaryDecoder)
+import Hylo.Core.Codec
+  ( Codec (..)
+  , Decoder (..)
+  , RowCodec
+  , codecDecoder
+  , runBinaryDecoder
+  )
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Query.Monad (Query (..), initialQueryState, runQuery)
 import Hylo.Core.Table (Table (..), TableSchema (..))
@@ -91,11 +101,16 @@ import Hylo.Core.Transaction
   , executeTx
   , initialTxState
   )
-import Hylo.PG.Codec.Binary (TableCodec (..))
-import Hylo.PG.Compiler.SQL (compilePostgresQuery, explainQuery)
+import Hylo.PG.Codec.Binary (Selectable (..), TableCodec (..))
+import Hylo.PG.Compiler.SQL (explainQuery)
 import Hylo.PG.Transaction.Hooks (executeCommitHooks, executeRollbackHooks)
 import Hylo.SQL.AST (Projectable (..))
-import Hylo.SQL.Builder (CompiledQuery (..), formatParamValue)
+import Hylo.SQL.Builder
+  ( CompiledQuery (..)
+  , Dialect (PostgresDialect)
+  , compileQuery
+  , formatParamValue
+  )
 import Text.Read (readMaybe)
 
 -- | PostgreSQL connection pool descriptor.
@@ -375,10 +390,14 @@ assembleRowBytes cols =
 
 -- | Decode a row from PostgreSQL wire column values using a 'RowCodec'.
 decodeRowWithCodec :: RowCodec r a -> Int -> Dec.Row a
-decodeRowWithCodec codec numCols = do
+decodeRowWithCodec codec = decodeRowWithBinaryDecoder (codecDecoder codec)
+
+-- | Decode a row from PostgreSQL wire column values using a binary wire 'Decoder'.
+decodeRowWithBinaryDecoder :: Decoder a -> Int -> Dec.Row a
+decodeRowWithBinaryDecoder dec numCols = do
   cols <- replicateM numCols rawColumnDecoder
   let rowBytes = assembleRowBytes cols
-  case runBinaryDecoder codec rowBytes of
+  case runBinaryDecoder (Codec (const mempty) dec) rowBytes of
     Left err -> fail (T.unpack err)
     Right val -> pure val
 
@@ -389,11 +408,21 @@ mkPreparedQueryStatement ::
   RowCodec r a ->
   Int ->
   Stmt.Statement [BoundParam] [a]
-mkPreparedQueryStatement sqlBS params codec numCols =
+mkPreparedQueryStatement sqlBS params codec =
+  mkPreparedQueryStatementWithDecoder sqlBS params (codecDecoder codec)
+
+-- | Build a prepared Hasql statement sending [BoundParam] and decoding result rows via 'Decoder'.
+mkPreparedQueryStatementWithDecoder ::
+  ByteString ->
+  [BoundParam] ->
+  Decoder a ->
+  Int ->
+  Stmt.Statement [BoundParam] [a]
+mkPreparedQueryStatementWithDecoder sqlBS params dec numCols =
   Stmt.Statement
     sqlBS
     (buildParamsEncoder params)
-    (Dec.rowList (decodeRowWithCodec codec numCols))
+    (Dec.rowList (decodeRowWithBinaryDecoder dec numCols))
     True
 
 -- | Execute a prepared query against PostgreSQL connection pool and hydrate domain rows.
@@ -404,78 +433,97 @@ executePreparedQuery ::
   RowCodec r a ->
   Int ->
   IO (Either TxError [a])
-executePreparedQuery (Pool _ _ (Just conn)) sqlText params codec numCols = do
-  let stmt = mkPreparedQueryStatement (TE.encodeUtf8 sqlText) params codec numCols
+executePreparedQuery targetPool sqlText params codec =
+  executePreparedQueryWithDecoder targetPool sqlText params (codecDecoder codec)
+
+-- | Execute a prepared query against PostgreSQL connection pool and hydrate domain rows via 'Decoder'.
+executePreparedQueryWithDecoder ::
+  Pool ->
+  Text ->
+  [BoundParam] ->
+  Decoder a ->
+  Int ->
+  IO (Either TxError [a])
+executePreparedQueryWithDecoder (Pool _ _ (Just conn)) sqlText params dec numCols = do
+  let stmt = mkPreparedQueryStatementWithDecoder (TE.encodeUtf8 sqlText) params dec numCols
   res <- Sess.run (Sess.statement params stmt) conn
   case res of
     Left qErr -> pure (Left (translateHasqlError qErr))
     Right rows -> pure (Right rows)
-executePreparedQuery (Pool _ _ Nothing) _ _ _ _ =
+executePreparedQueryWithDecoder (Pool _ _ Nothing) _ _ _ _ =
   pure (Left (TxUserError "executePreparedQuery: no active PostgreSQL connection in pool"))
 
 -- | Execute a typed Query against a PostgreSQL pool and hydrate domain rows.
 selectRows ::
-  forall table v.
-  (Projectable (table 'Expr), Table table, TableCodec table) =>
+  forall k (db :: k) expr res.
+  (Projectable expr, Selectable expr res) =>
   Pool ->
-  Query (Postgres v) (table 'Expr) ->
-  IO (Either TxError [table 'Result])
+  Query db expr ->
+  IO (Either TxError [res])
 selectRows targetPool q = do
-  let compiled = compilePostgresQuery q
+  let compiled = compileQuery PostgresDialect q
       (expr, _) = runQuery q initialQueryState
-      cols = case tableExprColumns expr of
-        [] -> projectColumns expr
+      cols = case projectColumns expr of
+        [] -> ["1"]
         cs -> cs
       numCols = length cols
-  executePreparedQuery
+  executePreparedQueryWithDecoder
     targetPool
     compiled.compiledSQL
     (toList compiled.compiledParams)
-    (tableCodec :: RowCodec (table 'Result) (table 'Result))
+    (selectableDecoder expr)
     numCols
 
 -- | Execute a typed Query against a PostgreSQL pool using a schema for column counting.
 selectRowsWithSchema ::
-  forall table v.
+  forall k (db :: k) table.
   (Projectable (table 'Expr), Table table, TableCodec table) =>
   Pool ->
   TableSchema table ->
-  Query (Postgres v) (table 'Expr) ->
+  Query db (table 'Expr) ->
   IO (Either TxError [table 'Result])
 selectRowsWithSchema targetPool schema q = do
-  let compiled = compilePostgresQuery q
+  let compiled = compileQuery PostgresDialect q
+      (expr, _) = runQuery q initialQueryState
       numCols = length (tableColDefs (tableMeta schema))
-  executePreparedQuery
+  executePreparedQueryWithDecoder
     targetPool
     compiled.compiledSQL
     (toList compiled.compiledParams)
-    (tableCodec :: RowCodec (table 'Result) (table 'Result))
+    (selectableDecoder expr)
     numCols
 
 -- | Transaction-aware counterpart to 'selectRows' recording 'OpQuery' and returning empty fallback rows.
 selectRowsTx ::
-  forall table v (mode :: TxMode).
-  (Projectable (table 'Expr), Table table, TableCodec table) =>
-  Query (Postgres v) (table 'Expr) ->
-  Tx (Postgres v) mode [table 'Result]
+  forall k (db :: k) expr res (mode :: TxMode).
+  (Projectable expr, Selectable expr res) =>
+  Query db expr ->
+  Tx db mode [res]
 selectRowsTx = selectRowsTxWith []
 
 -- | Transaction-aware counterpart to 'selectRows' recording 'OpQuery' and returning the given fallback rows.
 selectRowsTxWith ::
-  forall table v (mode :: TxMode).
-  (Projectable (table 'Expr), Table table, TableCodec table) =>
-  [table 'Result] ->
-  Query (Postgres v) (table 'Expr) ->
-  Tx (Postgres v) mode [table 'Result]
+  forall k (db :: k) expr res (mode :: TxMode).
+  (Projectable expr, Selectable expr res) =>
+  [res] ->
+  Query db expr ->
+  Tx db mode [res]
 selectRowsTxWith fallback q =
-  seq (tableCodec :: RowCodec (table 'Result) (table 'Result)) $
-    TxAction $ \st ->
-      let compiled = compilePostgresQuery q
-          (expr, _) = runQuery q initialQueryState
-          _unused = tableExprColumns expr
-          op = OpQuery (compiled.compiledSQL, toList compiled.compiledParams)
-          st' = st {txOperations = txOperations st ++ [op]}
-       in _unused `seq` (Right fallback, st')
+  let (expr, _) = runQuery q initialQueryState
+      _dec = selectableDecoder expr
+   in _dec `seq` TxAction $ \st ->
+        let compiled = compileQuery PostgresDialect q
+            op = OpQuery (compiled.compiledSQL, toList compiled.compiledParams)
+            st' = st {txOperations = txOperations st ++ [op]}
+         in (Right fallback, st')
+
+-- | Monadic query execution combinator within transactions, hydrating rows into domain results.
+select ::
+  forall k (db :: k) expr res (mode :: TxMode).
+  (Projectable expr, Selectable expr res) =>
+  Query db expr ->
+  Tx db mode [res]
+select = selectRowsTx
 
 -- | Execute a raw SQL statement against the pool's active connection.
 executeSql :: Pool -> Text -> IO (Either TxError ())
