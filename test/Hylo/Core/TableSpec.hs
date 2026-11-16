@@ -183,7 +183,6 @@ spec = describe "Epic 1: HKD Relational Schema Algebra & Dual Record Dot Project
           org = Org {id = oKey, name = "Acme Corp"}
       uKey.unId `shouldBe` oKey.unId
       org.name `shouldBe` "Acme Corp"
-
     it "preserves underlying key equality while preventing cross-table mixing" $
       property $ \(k :: Int64) ->
         let uKey = toId k :: Id UserT Int64
@@ -195,3 +194,18 @@ spec = describe "Epic 1: HKD Relational Schema Algebra & Dual Record Dot Project
           k3 = toId 200 :: Id UserT Int64
       k1 `shouldBe` k2
       k1 `shouldSatisfy` (< k3)
+
+  describe "7. Table Description Metadata" $ do
+    it "defaults tableDescription to Nothing in tableSchema" $ do
+      userSchema.tableDescription `shouldBe` (Nothing :: Maybe Text)
+
+    it "attaches a description via withTableDescription" $ do
+      let described = withTableDescription "Primary user registry" userSchema
+      described.tableDescription `shouldBe` Just "Primary user registry"
+
+    it "preserves the description across withRedisCache record updates" $ do
+      let described =
+            withRedisCache (RedisCachePolicy "users:" 300) $
+              withTableDescription "Primary user registry" userSchema
+      described.tableDescription `shouldBe` Just "Primary user registry"
+      described.tableCachePolicy `shouldBe` Just (RedisCachePolicy "users:" 300)

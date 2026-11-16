@@ -202,6 +202,7 @@ library
   hs-source-dirs: src/main
   exposed-modules:
       Hylo
+      Hylo.AI.Context.Exporter
       Hylo.AI.Policy.RLS
       Hylo.AI.QueryTool
       Hylo.AI.Schema.JSON
@@ -259,6 +260,7 @@ test-suite hylo-test
   main-is: Spec.hs
   hs-source-dirs: test
   other-modules:
+      Hylo.AI.Context.ExporterSpec
       Hylo.AI.QueryToolSpec
       Hylo.Backend.CapabilitySpec
       Hylo.Core.ChangesetSpec
