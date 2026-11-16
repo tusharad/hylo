@@ -24,6 +24,7 @@ Maintainer  : tusharadhatrao@gmail.com
 module Hylo.PG.Mutation.ChangesetSpec (spec) where
 
 import Data.Foldable (toList)
+import Data.Function ((&))
 import Data.Int (Int64)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
@@ -575,13 +576,14 @@ spec = describe "User Story 5: Wire Changeset into hylo-pg Binary Execution & Er
 
     it "renderUpdateChangesetSQL emits \"version\" = \"version\" + 1 and AND \"version\" = $expected" $ do
       let cs =
-            optimisticLock "version" 1
-              $ change @'UpdateOp
-              $ VersionedDoc
-                { docId = SetTo (toId 10)
-                , title = SetTo "Concurrency In Depth"
-                , version = Unchanged
-                }
+            change @'UpdateOp
+              ( VersionedDoc
+                  { docId = SetTo (toId 10)
+                  , title = SetTo "Concurrency In Depth"
+                  , version = Unchanged
+                  }
+              )
+              & optimisticLock "version" 1
           (sql, params) = renderUpdateChangesetSQL versionedDocSchema cs
       sql
         `shouldBe` "UPDATE \"documents\" SET \"title\" = $1, \"version\" = \"version\" + 1 WHERE \"id\" = $2 AND \"version\" = $3 RETURNING *"
@@ -593,13 +595,14 @@ spec = describe "User Story 5: Wire Changeset into hylo-pg Binary Execution & Er
 
     it "renderUpdateChangesetSQL emits \"version\" = \"version\" + 1 when no other fields are modified" $ do
       let cs =
-            optimisticLock "version" 3
-              $ change @'UpdateOp
-              $ VersionedDoc
-                { docId = SetTo (toId 5)
-                , title = Unchanged
-                , version = Unchanged
-                }
+            change @'UpdateOp
+              ( VersionedDoc
+                  { docId = SetTo (toId 5)
+                  , title = Unchanged
+                  , version = Unchanged
+                  }
+              )
+              & optimisticLock "version" 3
           (sql, params) = renderUpdateChangesetSQL versionedDocSchema cs
       sql
         `shouldBe` "UPDATE \"documents\" SET \"version\" = \"version\" + 1 WHERE \"id\" = $1 AND \"version\" = $2 RETURNING *"
@@ -610,13 +613,14 @@ spec = describe "User Story 5: Wire Changeset into hylo-pg Binary Execution & Er
 
     it "renderUpdateChangesetSQL infers column name via optimisticLockVersion" $ do
       let cs =
-            optimisticLockVersion 9
-              $ change @'UpdateOp
-              $ VersionedDoc
-                { docId = SetTo (toId 20)
-                , title = SetTo "Auto-Inferred"
-                , version = Unchanged
-                }
+            change @'UpdateOp
+              ( VersionedDoc
+                  { docId = SetTo (toId 20)
+                  , title = SetTo "Auto-Inferred"
+                  , version = Unchanged
+                  }
+              )
+              & optimisticLockVersion 9
           (sql, params) = renderUpdateChangesetSQL versionedDocSchema cs
       sql
         `shouldBe` "UPDATE \"documents\" SET \"title\" = $1, \"version\" = \"version\" + 1 WHERE \"id\" = $2 AND \"version\" = $3 RETURNING *"
@@ -643,10 +647,9 @@ spec = describe "User Story 5: Wire Changeset into hylo-pg Binary Execution & Er
     it "updateChangesetWithFallback rejects stale version with stale_object error" $ do
       let doc1 = VersionedDoc (toId 1) "Initial" 1
           csStale =
-            withUniqueKey "sim_stale"
-              $ optimisticLock "version" 1
-              $ change @'UpdateOp
-              $ VersionedDoc (SetTo (toId 1)) (SetTo "Conflict") Unchanged
+            change @'UpdateOp (VersionedDoc (SetTo (toId 1)) (SetTo "Conflict") Unchanged)
+              & optimisticLock "version" 1
+              & withUniqueKey "sim_stale"
           tx =
             updateChangesetWithFallback versionedDocSchema doc1 csStale ::
               Tx (Postgres 'PG16) 'ReadWrite (Either ChangesetError VersionedDoc)
@@ -660,15 +663,13 @@ spec = describe "User Story 5: Wire Changeset into hylo-pg Binary Execution & Er
     it "updateChangesetWithFallback detects successive modification conflict on identical entity" $ do
       let doc2 = VersionedDoc (toId 1) "V2" 2
           cs1 =
-            withUniqueKey "doc_1"
-              $ optimisticLock "version" 1
-              $ change @'UpdateOp
-              $ VersionedDoc (SetTo (toId 1)) (SetTo "V2") Unchanged
+            change @'UpdateOp (VersionedDoc (SetTo (toId 1)) (SetTo "V2") Unchanged)
+              & optimisticLock "version" 1
+              & withUniqueKey "doc_1"
           cs2 =
-            withUniqueKey "doc_1"
-              $ optimisticLock "version" 1
-              $ change @'UpdateOp
-              $ VersionedDoc (SetTo (toId 1)) (SetTo "V2_Conflict") Unchanged
+            change @'UpdateOp (VersionedDoc (SetTo (toId 1)) (SetTo "V2_Conflict") Unchanged)
+              & optimisticLock "version" 1
+              & withUniqueKey "doc_1"
           txCompound ::
             Tx
               (Postgres 'PG16)
