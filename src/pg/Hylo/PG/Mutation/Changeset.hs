@@ -65,6 +65,7 @@ module Hylo.PG.Mutation.Changeset
 import Control.DeepSeq (NFData (..))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import Data.Dynamic (fromDynamic)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
@@ -108,6 +109,11 @@ import Hylo.PG.Error.Translation
   ( DbError (..)
   , mockSqlStateErrorFull
   , translateChangesetDbError
+  )
+import Hylo.Redis
+  ( getDefaultRedisClient
+  , redisDel
+  , tableCacheKey
   )
 
 --------------------------------------------------------------------------------
@@ -331,10 +337,24 @@ updateChangesetWithRow schema codec wireBytes cs =
                   verStore = case changesetOptimisticLock cs of
                     Just (_, expectedVer) -> [(tName <> "_ver_" <> pkVal, T.pack (show (expectedVer + 1)))]
                     Nothing -> []
+                  mTxClient = lookup "redis_client" (txCustomExtensions st) >>= fromDynamic
+                  cacheHooks = case tableCachePolicy schema of
+                    Just policy ->
+                      let cacheKey = tableCacheKey policy schema pkVal
+                          hook = case mTxClient of
+                            Just client -> redisDel client cacheKey
+                            Nothing -> do
+                              mDefault <- getDefaultRedisClient
+                              case mDefault of
+                                Just client -> redisDel client cacheKey
+                                Nothing -> pure ()
+                       in [hook]
+                    Nothing -> []
                   st' =
                     st
                       { txOperations = txOperations st ++ [OpMutate (sqlText, params)]
                       , txStore = verStore ++ txStore st
+                      , txCommitHooks = txCommitHooks st ++ cacheHooks
                       }
                in if not (BS.null wireBytes)
                     then case decodeReturningRow codec wireBytes of
@@ -388,10 +408,24 @@ updateChangesetWithFallback schema fallback cs =
                 verStore = case changesetOptimisticLock cs of
                   Just (_, expectedVer) -> [(tName <> "_ver_" <> pkVal, T.pack (show (expectedVer + 1)))]
                   Nothing -> []
+                mTxClient = lookup "redis_client" (txCustomExtensions st) >>= fromDynamic
+                cacheHooks = case tableCachePolicy schema of
+                  Just policy ->
+                    let cacheKey = tableCacheKey policy schema pkVal
+                        hook = case mTxClient of
+                          Just client -> redisDel client cacheKey
+                          Nothing -> do
+                            mDefault <- getDefaultRedisClient
+                            case mDefault of
+                              Just client -> redisDel client cacheKey
+                              Nothing -> pure ()
+                     in [hook]
+                  Nothing -> []
                 st' =
                   st
                     { txOperations = txOperations st ++ [OpMutate (sqlText, params)]
                     , txStore = verStore ++ txStore st
+                    , txCommitHooks = txCommitHooks st ++ cacheHooks
                     }
              in (Right (Right fallback), st')
 
@@ -500,7 +534,27 @@ runUpdateChangesetIOWith pool schema codec cs =
                                 )
                             )
                         )
-        Right (row : _) -> pure (Right row)
+        Right (row : _) -> do
+          case tableCachePolicy schema of
+            Just policy -> do
+              mDefault <- getDefaultRedisClient
+              case mDefault of
+                Just client -> do
+                  let key = changesetKey cs
+                      tName = tableName schema
+                      pkCol = findPrimaryKeyCol schema
+                      entries = patchEntries (tableMeta schema) (changesetPatch cs)
+                      pkVal =
+                        if key /= "" && key /= tName
+                          then key
+                          else case [v | (c, ValSetTo v) <- entries, colName c == pkCol] of
+                            (v : _) -> v
+                            [] -> if key /= "" then key else "1"
+                      cacheKey = tableCacheKey policy schema pkVal
+                  redisDel client cacheKey
+                Nothing -> pure ()
+            Nothing -> pure ()
+          pure (Right row)
 
 --------------------------------------------------------------------------------
 -- 6. Error Translation Integration

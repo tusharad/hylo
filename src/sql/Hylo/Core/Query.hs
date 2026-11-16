@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
@@ -82,6 +83,7 @@ module Hylo.Core.Query
   , update
   , delete
   , deleteById
+  , deleteWhere
 
     -- * Cross-Backend Dialect Renderers
   , compileStandardSQL
@@ -95,6 +97,8 @@ module Hylo.Core.Query
   )
 where
 
+import Data.Dynamic (fromDynamic)
+import Data.Foldable (toList)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
@@ -144,6 +148,11 @@ import Hylo.Core.Table
   )
 import Hylo.Core.Transaction
 import Hylo.Core.TypeError (AssertWritable (..), writableDict)
+import Hylo.Redis
+  ( getDefaultRedisClient
+  , redisDel
+  , tableCacheKey
+  )
 import Hylo.SQL.AST
   ( FromItem (..)
   , LockClause (..)
@@ -161,6 +170,7 @@ import Hylo.SQL.AST
 import Hylo.SQL.Builder
   ( CompiledQuery (..)
   , Dialect (..)
+  , compileExpr
   , compileQuery
   , inferParamType
   , previewQuery
@@ -336,6 +346,15 @@ insert schema cs =
                       }
                in (Right (errorWithoutStackTrace "insert: simulated entity hydration"), st')
 
+-- | Attempt to extract a primary key literal value from a boolean predicate expression.
+extractKeyFromPredicate :: Text -> QExpr Bool -> Maybe Text
+extractKeyFromPredicate pkCol = \case
+  BinOpExpr "=" (ColExpr _ c) (LitExpr val) | c == pkCol -> Just val
+  BinOpExpr "=" (ColExpr _ c) (LitTypedExpr val _) | c == pkCol -> Just val
+  BinOpExpr "=" (LitExpr val) (ColExpr _ c) | c == pkCol -> Just val
+  BinOpExpr "=" (LitTypedExpr val _) (ColExpr _ c) | c == pkCol -> Just val
+  _ -> Nothing
+
 -- | Statically guarded update operation. Fails with [Hylo Error E005] in ReadOnly mode.
 update ::
   forall k (db :: k) table (mode :: TxMode) op.
@@ -347,7 +366,34 @@ update schema cs =
   writableDict (Proxy :: Proxy mode) `seq`
     TxAction $ \st ->
       let (sql, params) = renderUpdateChangesetSQL schema cs
-          st' = st {txOperations = txOperations st ++ [OpMutate (sql, params)]}
+          key = changesetKey cs
+          tName = tableName schema
+          pkCol = findPrimaryKeyCol schema
+          entries = patchEntries (tableMeta schema) (changesetPatch cs)
+          pkVal =
+            if key /= "" && key /= tName
+              then key
+              else case [v | (c, ValSetTo v) <- entries, colName c == pkCol] of
+                (v : _) -> v
+                [] -> if key /= "" then key else "1"
+          mTxClient = lookup "redis_client" (txCustomExtensions st) >>= fromDynamic
+          cacheHooks = case tableCachePolicy schema of
+            Just policy ->
+              let cacheKey = tableCacheKey policy schema pkVal
+                  hook = case mTxClient of
+                    Just client -> redisDel client cacheKey
+                    Nothing -> do
+                      mDefault <- getDefaultRedisClient
+                      case mDefault of
+                        Just client -> redisDel client cacheKey
+                        Nothing -> pure ()
+               in [hook]
+            Nothing -> []
+          st' =
+            st
+              { txOperations = txOperations st ++ [OpMutate (sql, params)]
+              , txCommitHooks = txCommitHooks st ++ cacheHooks
+              }
        in (Right (errorWithoutStackTrace "update: simulated entity hydration"), st')
 
 -- | Statically guarded delete operation. Fails with [Hylo Error E005] in ReadOnly mode.
@@ -379,7 +425,62 @@ deleteById schema pkId =
             [] -> (quoteIdentifier PostgresDialect "id", inferParamType pkVal)
           sql = "DELETE FROM " <> tName <> " WHERE " <> pkCol <> " = $1"
           params = [BoundParam 1 pkVal pkType]
-          st' = st {txOperations = txOperations st ++ [OpMutate (sql, params)]}
+          mTxClient = lookup "redis_client" (txCustomExtensions st) >>= fromDynamic
+          cacheHooks = case tableCachePolicy schema of
+            Just policy ->
+              let key = tableCacheKey policy schema pkVal
+                  hook = case mTxClient of
+                    Just client -> redisDel client key
+                    Nothing -> do
+                      mDefault <- getDefaultRedisClient
+                      case mDefault of
+                        Just client -> redisDel client key
+                        Nothing -> pure ()
+               in [hook]
+            Nothing -> []
+          st' =
+            st
+              { txOperations = txOperations st ++ [OpMutate (sql, params)]
+              , txCommitHooks = txCommitHooks st ++ cacheHooks
+              }
+       in (Right (), st')
+
+-- | Statically guarded delete operation with a predicate expression.
+deleteWhere ::
+  forall k (db :: k) table (mode :: TxMode).
+  (AssertWritable mode, Table table) =>
+  TableSchema table ->
+  (table 'Expr -> QExpr Bool) ->
+  Tx db mode ()
+deleteWhere schema predicate =
+  writableDict (Proxy :: Proxy mode) `seq`
+    TxAction $ \st ->
+      let tName = quoteIdentifier PostgresDialect (tableName schema)
+          exprTable = toTableExpr "" (tableMeta schema)
+          predExpr = predicate exprTable
+          (whereSql, paramsSeq) = compileExpr PostgresDialect predExpr
+          params = toList paramsSeq
+          sql = "DELETE FROM " <> tName <> (if T.null whereSql then "" else " WHERE " <> whereSql)
+          pkCol = findPrimaryKeyCol schema
+          mExtractedKey = extractKeyFromPredicate pkCol predExpr
+          mTxClient = lookup "redis_client" (txCustomExtensions st) >>= fromDynamic
+          cacheHooks = case (tableCachePolicy schema, mExtractedKey) of
+            (Just policy, Just k) ->
+              let key = tableCacheKey policy schema k
+                  hook = case mTxClient of
+                    Just client -> redisDel client key
+                    Nothing -> do
+                      mDefault <- getDefaultRedisClient
+                      case mDefault of
+                        Just client -> redisDel client key
+                        Nothing -> pure ()
+               in [hook]
+            _ -> []
+          st' =
+            st
+              { txOperations = txOperations st ++ [OpMutate (sql, params)]
+              , txCommitHooks = txCommitHooks st ++ cacheHooks
+              }
        in (Right (), st')
 
 --------------------------------------------------------------------------------

@@ -87,6 +87,7 @@ library hylo-sql
     , containers >=0.6 && <0.8
     , deepseq >=1.4 && <2
     , hylo:hylo-core
+    , hylo:hylo-redis
     , text >=1.2 && <3
     , transformers >=0.5 && <0.7
     , vector >=0.12 && <0.14
@@ -98,6 +99,7 @@ library hylo-pg
   exposed-modules:
       Hylo.PG
       Hylo.PG.Array
+      Hylo.PG.Cache.Redis
       Hylo.PG.Codec.Binary
       Hylo.PG.Compiler.Aggregate
       Hylo.PG.Compiler.CTE
@@ -134,6 +136,7 @@ library hylo-pg
     , hasql-pool >=1.0 && <2
     , hasql-transaction >=1.1 && <2
     , hylo:hylo-core
+    , hylo:hylo-redis
     , hylo:hylo-sql
     , scientific >=0.3 && <0.4
     , stm >=2.5 && <3
@@ -180,7 +183,12 @@ library hylo-redis
       Hylo.Redis
   build-depends:
       base >=4.7 && <5
+    , bytestring >=0.10 && <0.13
+    , containers >=0.6 && <0.8
+    , deepseq >=1.4 && <2
     , hylo:hylo-core
+    , stm >=2.5 && <3
+    , text >=1.2 && <3
 
 library
   import: common-options
@@ -247,6 +255,7 @@ test-suite hylo-test
       Hylo.Migrate.DiffSpec
       Hylo.Migrate.LinterSpec
       Hylo.PG.AlgebraSpec
+      Hylo.PG.Cache.RedisSpec
       Hylo.PG.Compiler.AggregateSpec
       Hylo.PG.Compiler.CTESpec
       Hylo.PG.Compiler.JoinFlattenerSpec

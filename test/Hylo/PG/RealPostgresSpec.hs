@@ -20,6 +20,7 @@ Maintainer  : tusharadhatrao@gmail.com
 -}
 module Hylo.PG.RealPostgresSpec (spec) where
 
+import Control.Monad (forM_)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as BSL
 import Data.Int (Int64)
@@ -52,8 +53,10 @@ import Hylo.Core
   , Id (..)
   , NullableTable (..)
   , PatchField (..)
+  , RedisCachePolicy (..)
   , Table (..)
   , TableSchema (..)
+  , ToFieldValue (..)
   , colSpecExpr
   , column
   , diffField
@@ -65,9 +68,10 @@ import Hylo.Core
   , primaryKey
   , tableSchema
   , toId
+  , withRedisCache
   )
 import Hylo.Core.Changeset (FieldError (..), OpKind (..), change)
-import Hylo.Core.Codec (Codec (..), field)
+import Hylo.Core.Codec (Codec (..), field, runBinaryEncoder)
 import Hylo.Core.Expr (just, lit, (==.))
 import Hylo.Core.Query (Query, delete, each, leftJoin, where_)
 import Hylo.Core.Transaction
@@ -80,6 +84,7 @@ import Hylo.Core.Transaction
   , withSavepoint
   )
 import Hylo.Core.TypeError (TxMode (..))
+import Hylo.PG.Cache.Redis (selectManyCachedByIds)
 import Hylo.PG.Codec.Binary
   ( boolCodec
   , dayCodec
@@ -119,6 +124,7 @@ import Hylo.PG.Transaction.Retry
   , simulateWriteConflictOnce
   )
 import Hylo.PG.Vector (Embedding (..), renderVectorText)
+import Hylo.Redis (newMockRedis, redisSet, tableCacheKey)
 import Hylo.SQL.AST (Projectable (..), renderExpr)
 import Hylo.Test.Docker (getTestPgVersion, withTestPostgres)
 import Test.Hspec
@@ -891,6 +897,61 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
                 `shouldBe` (FieldError "version" "stale_object" "Record was modified by another transaction" :| [])
             Right _ -> expectationFailure "Expected stale_object error on concurrent conflicting update"
 
+  it
+    "User Story 3 Acceptance Criterion: selectManyCachedByIds reads hits from Redis, queries Postgres for misses, backfills Redis with SETEX, and returns all records in order"
+    $ withTestPostgres
+    $ \p -> do
+      case poolActiveConnection p of
+        Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
+        Just _ -> do
+          _ <-
+            executeSql
+              p
+              "DROP TABLE IF EXISTS test_live_story3_accounts CASCADE; \
+              \CREATE TABLE test_live_story3_accounts ( \
+              \  id BIGINT PRIMARY KEY, \
+              \  name TEXT NOT NULL, \
+              \  score BIGINT NOT NULL \
+              \);"
+
+          -- Insert 100 rows into PostgreSQL
+          forM_ [1 .. 100 :: Int64] $ \i -> do
+            let sql =
+                  "INSERT INTO test_live_story3_accounts (id, name, score) VALUES ("
+                    <> T.pack (show i)
+                    <> ", 'User "
+                    <> T.pack (show i)
+                    <> "', "
+                    <> T.pack (show (i * 10))
+                    <> ");"
+            _ <- executeSql p sql
+            pure ()
+
+          (client, _, _) <- newMockRedis
+          let policy = RedisCachePolicy "real_cache" 3600
+              cachedSchema = withRedisCache policy story3AccountSchema
+              all100Ids = [Id i :: Id Story3AccountT Int64 | i <- [1 .. 100]]
+
+          -- Pre-populate Redis with 80 records (IDs 1..80)
+          forM_ [1 .. 80 :: Int64] $ \i -> do
+            let acc = Story3Account (Id i) ("User " <> T.pack (show i)) (i * 10)
+                key = tableCacheKey policy cachedSchema (T.pack (show i))
+                encoded = runBinaryEncoder tableCodec acc
+            redisSet client key encoded
+
+          -- Execute selectManyCachedByIds against live PostgreSQL pool
+          res <- selectManyCachedByIds client p cachedSchema all100Ids
+          case res of
+            Left err -> expectationFailure ("Expected successful hydration, got error: " ++ show err)
+            Right rows -> do
+              length rows `shouldBe` 100
+              let expected :: [Story3Account]
+                  expected =
+                    [ Story3Account (Id i) ("User " <> T.pack (show i)) (i * 10)
+                    | i <- [1 .. 100]
+                    ]
+              rows `shouldBe` expected
+
 -- -----------------------------------------------------------------------------
 -- User Story 12 Test Row Type & Codec
 -- -----------------------------------------------------------------------------
@@ -1286,3 +1347,63 @@ instance TableCodec Story2AccountT where
       <*> field (.name) textCodec
       <*> field (.score) int64Codec
       <*> field (.version) int64Codec
+
+-- -----------------------------------------------------------------------------
+-- User Story 3 Test Table & Codec (Redis Caching)
+-- -----------------------------------------------------------------------------
+
+data Story3AccountT (ctx :: Ctx) = Story3Account
+  { id :: !(Col ctx (Id Story3AccountT Int64))
+  , name :: !(Col ctx Text)
+  , score :: !(Col ctx Int64)
+  }
+  deriving (Generic)
+
+deriving instance Eq (Story3AccountT 'Result)
+deriving instance Show (Story3AccountT 'Result)
+deriving instance Eq (Story3AccountT 'Patch)
+deriving instance Show (Story3AccountT 'Patch)
+
+type Story3Account = Story3AccountT 'Result
+
+story3AccountSchema :: TableSchema Story3AccountT
+story3AccountSchema =
+  tableSchema "test_live_story3_accounts" $
+    Story3Account
+      { id = primaryKey "id" "bigint"
+      , name = column "name" "text"
+      , score = column "score" "bigint"
+      }
+
+instance Table Story3AccountT where
+  toTableExpr alias m =
+    Story3Account
+      { id = colSpecExpr alias m.id
+      , name = colSpecExpr alias m.name
+      , score = colSpecExpr alias m.score
+      }
+  diffTable old new =
+    Story3Account
+      { id = diffField old.id new.id
+      , name = diffField old.name new.name
+      , score = diffField old.score new.score
+      }
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.name
+    , eraseColDef m.score
+    ]
+  patchEntries meta patch =
+    concat
+      [ patchEntry meta.id patch.id
+      , patchEntry meta.name patch.name
+      , patchEntry meta.score patch.score
+      ]
+  tablePrimaryKey acc = Just (toFieldValue acc.id)
+
+instance TableCodec Story3AccountT where
+  tableCodec =
+    Story3Account
+      <$> field (.id) (idCodec int64Codec)
+      <*> field (.name) textCodec
+      <*> field (.score) int64Codec

@@ -45,6 +45,10 @@ module Hylo.Core.Transaction
   , onCommit
   , onRollback
 
+    -- * Transaction Extension Store
+  , setTxExtension
+  , getTxExtension
+
     -- * In-Memory Cursor Simulation
   , registerCursorData
   , getCursorData
@@ -125,14 +129,15 @@ data TxState = TxState
   , txCommitHooks :: ![IO ()]
   , txRollbackHooks :: ![IO ()]
   , txCursorStore :: ![(Text, Dynamic)]
+  , txCustomExtensions :: ![(Text, Dynamic)]
   }
 
 instance Eq TxState where
-  TxState s1 o1 st1 a1 _ _ _ == TxState s2 o2 st2 a2 _ _ _ =
+  TxState s1 o1 st1 a1 _ _ _ _ == TxState s2 o2 st2 a2 _ _ _ _ =
     s1 == s2 && o1 == o2 && st1 == st2 && a1 == a2
 
 instance Show TxState where
-  showsPrec d (TxState s o st a ch rh cs) =
+  showsPrec d (TxState s o st a ch rh cs ce) =
     showParen (d > 10) $
       showString "TxState { txSavepointSeq = "
         . shows s
@@ -150,11 +155,14 @@ instance Show TxState where
         . showString " hooks>"
         . showString ", txCursorStore = <"
         . shows (length cs)
-        . showString " cursors> }"
+        . showString " cursors>"
+        . showString ", txCustomExtensions = <"
+        . shows (length ce)
+        . showString " items> }"
 
 -- | Initial state for a new transaction computation.
 initialTxState :: TxState
-initialTxState = TxState 0 [] [] 0 [] [] []
+initialTxState = TxState 0 [] [] 0 [] [] [] []
 
 -- | Pure operational Transaction monad parameterized by backend marker and phantom mode.
 data Tx (db :: k) (mode :: TxMode) a where
@@ -225,6 +233,7 @@ withSavepoint subTx = TxAction $ \st ->
       commitHooksSnapshot = txCommitHooks st
       rollbackHooksSnapshot = txRollbackHooks st
       cursorStoreSnapshot = txCursorStore st
+      customExtensionsSnapshot = txCustomExtensions st
    in case executeTx subTx stBefore of
         (Left err, stAfterFail) ->
           let stRolledBack =
@@ -233,6 +242,7 @@ withSavepoint subTx = TxAction $ \st ->
                   , txCommitHooks = commitHooksSnapshot
                   , txRollbackHooks = rollbackHooksSnapshot
                   , txCursorStore = cursorStoreSnapshot
+                  , txCustomExtensions = customExtensionsSnapshot
                   , txOperations = txOperations stAfterFail ++ [OpRollbackSavepoint token spName]
                   }
            in (Right (Left err), stRolledBack)
@@ -271,6 +281,20 @@ takeCursorRows name count = TxAction $ \st ->
 removeCursorData :: forall k (db :: k) mode. Text -> Tx db mode ()
 removeCursorData name = TxAction $ \st ->
   (Right (), st {txCursorStore = filter ((/= name) . fst) (txCursorStore st)})
+
+-- | Store a dynamic transaction-scoped extension by key.
+setTxExtension :: forall k (db :: k) mode a. (Typeable a) => Text -> a -> Tx db mode ()
+setTxExtension key val = TxAction $ \st ->
+  ( Right ()
+  , st {txCustomExtensions = (key, toDyn val) : filter ((/= key) . fst) (txCustomExtensions st)}
+  )
+
+-- | Retrieve a dynamic transaction-scoped extension by key.
+getTxExtension :: forall k (db :: k) mode a. (Typeable a) => Text -> Tx db mode (Maybe a)
+getTxExtension key = TxAction $ \st ->
+  case lookup key (txCustomExtensions st) of
+    Just dyn -> (Right (fromDynamic dyn), st)
+    Nothing -> (Right Nothing, st)
 
 -- | Execute a 'Tx' action against an explicit initial state.
 executeTx :: forall k (db :: k) mode a. Tx db mode a -> TxState -> (Either TxError a, TxState)

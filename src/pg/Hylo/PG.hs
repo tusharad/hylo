@@ -6,7 +6,8 @@ License     : MIT
 Maintainer  : tusharadhatrao@gmail.com
 -}
 module Hylo.PG
-  ( module Hylo.PG.Codec.Binary
+  ( module Hylo.PG.Cache.Redis
+  , module Hylo.PG.Codec.Binary
   , module Hylo.PG.Compiler.Aggregate
   , module Hylo.PG.Compiler.CTE
   , module Hylo.PG.Compiler.JoinFlattener
@@ -36,6 +37,7 @@ module Hylo.PG
   ) where
 
 import Hylo.PG.Array
+import Hylo.PG.Cache.Redis
 import Hylo.PG.Codec.Binary
 import Hylo.PG.Compiler.Aggregate
 import Hylo.PG.Compiler.CTE
