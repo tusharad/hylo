@@ -82,13 +82,21 @@ module Hylo.Core.TypeError
   , PGVersion (..)
   , CheckPGMinVersion
   , AssertPGMinVersion (..)
+
+    -- * E017: Unknown Enum Label
+  , LabelIn
+  , RenderLabels
+  , CheckEnumLabel
+  , AssertEnumLabel (..)
+  , HasEnumLabels (..)
   ) where
 
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 import GHC.TypeLits
-  ( ErrorMessage (..)
+  ( AppendSymbol
+  , ErrorMessage (..)
   , Nat
   , Symbol
   , TypeError
@@ -543,3 +551,58 @@ class AssertPGMinVersion (actual :: PGVersion) (required :: PGVersion) (feature 
 
 instance (CheckPGMinVersion actual required feature ~ 'True) => AssertPGMinVersion actual required feature where
   pgMinVersionDict _ _ _ = ()
+
+--------------------------------------------------------------------------------
+-- E017: Unknown Enum Label
+--------------------------------------------------------------------------------
+
+-- | Type-level membership of a label in a registered enum label list.
+type family LabelIn (label :: Symbol) (labels :: [Symbol]) :: Bool where
+  LabelIn _ '[] = 'False
+  LabelIn l (l ': _) = 'True
+  LabelIn l (_ ': rest) = LabelIn l rest
+
+-- | Render a type-level label list as a comma-separated diagnostic string.
+type family RenderLabels (labels :: [Symbol]) :: Symbol where
+  RenderLabels '[] = ""
+  RenderLabels '[l] = l
+  RenderLabels (l ': rest) = AppendSymbol l (AppendSymbol ", " (RenderLabels rest))
+
+{- | Type family validating enum literal labels against the registered labels
+of the target enum column, emitting [Hylo Error E017] on unknown labels.
+-}
+type family CheckEnumLabel (col :: Symbol) (label :: Symbol) (labels :: [Symbol]) (known :: Bool) :: Bool where
+  CheckEnumLabel _ _ _ 'True = 'True
+  CheckEnumLabel col label labels 'False =
+    TypeError
+      ( 'Text "[Hylo Error E017] Unknown enum label \""
+          ':<>: 'Text label
+          ':<>: 'Text "\" for column \""
+          ':<>: 'Text col
+          ':<>: 'Text "\". Labels are: "
+          ':<>: 'Text (RenderLabels labels)
+          ':$$: 'Text
+                  "  Context: Literal comparisons against enum columns must use one of the labels registered via 'enumCol' / 'sumTypeCol'."
+          ':$$: 'Text
+                  "  Hint:    Compare with 'enumLit' using a registered label, or extend the label list passed to 'enumCol'."
+      )
+
+-- | Class asserting that a literal label is a registered enum label.
+class AssertEnumLabel (col :: Symbol) (label :: Symbol) (labels :: [Symbol]) (known :: Bool) where
+  enumLabelDict :: Proxy col -> Proxy label -> Proxy labels -> Proxy known -> ()
+
+instance
+  (CheckEnumLabel col label labels known ~ 'True) =>
+  AssertEnumLabel col label labels known
+  where
+  enumLabelDict _ _ _ _ = ()
+
+{- | Class of enum ADTs exposing their registered labels at the type level.
+Mirrors the value-level label list passed to 'enumCol' / 'sumTypeCol'.
+-}
+class HasEnumLabels a where
+  type EnumLabelsOf a :: [Symbol]
+
+  -- | Dictionary witness forcing the instance at constraint check time.
+  hasEnumLabelsDict :: Proxy a -> ()
+  hasEnumLabelsDict _ = ()

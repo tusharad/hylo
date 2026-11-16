@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE NoFieldSelectors #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
@@ -209,3 +210,32 @@ spec = describe "Epic 1: HKD Relational Schema Algebra & Dual Record Dot Project
               withTableDescription "Primary user registry" userSchema
       described.tableDescription `shouldBe` Just "Primary user registry"
       described.tableCachePolicy `shouldBe` Just (RedisCachePolicy "users:" 300)
+
+  describe "8. User Story 19: enumCol & sumTypeCol Column Descriptors" $ do
+    it "enumCol marks the column as an enum carrying the registered labels" $ do
+      let c = enumCol (enumCodec orderStatusPairs) ["pending", "shipped", "delivered"] "status"
+      c.colIsEnum `shouldBe` True
+      c.colEnumLabels `shouldBe` ["pending", "shipped", "delivered"]
+      c.colName `shouldBe` "status"
+      c.colSqlType `shouldBe` "status"
+
+    it "sumTypeCol derives snake_case labels from a bounded sum type" $ do
+      let c = sumTypeCol @OrderStatus "status"
+      c.colIsEnum `shouldBe` True
+      c.colEnumLabels `shouldBe` ["pending", "shipped", "delivered"]
+      c.colSqlType `shouldBe` "status"
+
+    it "enum columns keep standard flag defaults" $ do
+      let c = sumTypeCol @OrderStatus "status"
+      c.colIsPrimaryKey `shouldBe` False
+      c.colIsNullable `shouldBe` False
+      c.colIsOptimisticLock `shouldBe` False
+      c.colDescription `shouldBe` Nothing
+
+-- | User Story 19 fixture: a bounded sum type mapping to a PostgreSQL ENUM column.
+data OrderStatus = Pending | Shipped | Delivered
+  deriving (Eq, Show, Bounded, Enum)
+
+-- | Registered (label, constructor) pairs for 'OrderStatus'.
+orderStatusPairs :: [(Text, OrderStatus)]
+orderStatusPairs = [("pending", Pending), ("shipped", Shipped), ("delivered", Delivered)]

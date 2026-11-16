@@ -245,6 +245,7 @@ renderSqlType = \case
   TypeVector (Just dim) -> "vector(" <> T.pack (show dim) <> ")"
   TypeVector Nothing -> "vector"
   TypeCustom t -> t
+  EnumType ty _ -> ty
 
 -- | Convert a ColumnType and nullability to Haskell type representation.
 columnTypeToHaskell :: ColumnType -> ColumnNullability -> Text
@@ -266,6 +267,7 @@ columnTypeToHaskell cType nullability =
         TypeVector (Just dim) -> "Embedding \"default\" " <> T.pack (show dim)
         TypeVector Nothing -> "Embedding \"default\" 1536"
         TypeCustom t -> t
+        EnumType ty _ -> ty
    in case nullability of
         NotNull -> baseType
         Nullable ->

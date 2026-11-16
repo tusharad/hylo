@@ -118,7 +118,8 @@ schemasToCatalog defs =
   Catalog
     { catalogTables = Map.fromList [(tblName def, def) | def <- defs]
     , catalogExtensions = Set.empty
-    , catalogEnums = Map.empty
+    , catalogEnums =
+        Map.fromList [(ty, ls) | def <- defs, c <- tblColumns def, EnumType ty ls <- [colType c]]
     }
 
 -- | Convert a core 'ColDef ()' to an AST 'ColumnDef'.
@@ -126,7 +127,10 @@ colDefToColumnDef :: ColDef () -> ColumnDef
 colDefToColumnDef c =
   ColumnDef
     { colName = ColumnName c.colName
-    , colType = logicalAndSqlToColumnType c.colLogicalType c.colSqlType
+    , colType =
+        if c.colIsEnum
+          then EnumType c.colName c.colEnumLabels
+          else logicalAndSqlToColumnType c.colLogicalType c.colSqlType
     , colNullability = if c.colIsNullable then Nullable else NotNull
     , colDefault = Nothing
     , colIsPrimaryKey = c.colIsPrimaryKey

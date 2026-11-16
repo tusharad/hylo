@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -5,6 +6,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -28,6 +30,7 @@ module Hylo.Core.Expr
   , isNull_
   , IsNullToken (..)
   , coalesce
+  , enumLit
   , EqOp (..)
   , (/=.)
   , (<.)
@@ -45,7 +48,14 @@ import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Hylo.Core.TypeError (AssertComparable (..))
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
+import Hylo.Core.TypeError
+  ( AssertComparable (..)
+  , AssertEnumLabel (..)
+  , EnumLabelsOf
+  , HasEnumLabels (..)
+  , LabelIn
+  )
 
 -- | Class of expression types convertible to 'QExpr'.
 class ToQExpr e a | e -> a where
@@ -204,6 +214,29 @@ isNull_ = UnaryOpExpr "IS NULL"
 -- | Provide a fallback value for a nullable expression.
 coalesce :: QExpr (Maybe a) -> QExpr a -> QExpr a
 coalesce = CoalesceExpr
+
+{- | Compile-time-verified enum label literal for enum-typed columns.
+
+Emits @[Hylo Error E017]@ when 'label' is not one of the labels registered
+for the column's enum ADT via its 'HasEnumLabels' instance.
+
+Usage: @where_ (order.status ==. enumLit @"pending" (Proxy @"status"))@
+-}
+enumLit ::
+  forall (label :: Symbol) (col :: Symbol) a.
+  ( HasEnumLabels a
+  , KnownSymbol label
+  , AssertEnumLabel col label (EnumLabelsOf a) (LabelIn label (EnumLabelsOf a))
+  ) =>
+  Proxy col ->
+  QExpr a
+enumLit _ = case hasEnumLabelsDict (Proxy @a) of
+  () -> case enumLabelDict
+    (Proxy @col)
+    (Proxy @label)
+    (Proxy @(EnumLabelsOf a))
+    (Proxy @(LabelIn label (EnumLabelsOf a))) of
+    () -> LitExpr (T.pack (symbolVal (Proxy @label)))
 
 instance (Num a, Show a) => Num (QExpr a) where
   (+) = BinOpExpr "+"

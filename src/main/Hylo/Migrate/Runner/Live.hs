@@ -76,7 +76,7 @@ import Hylo.Migrate.Catalog.PG
   , introspectIndexesQuery
   , introspectTablesQuery
   )
-import Hylo.Migrate.Diff (computeCatalogDiff, renderReversibleDDL)
+import Hylo.Migrate.Diff (computeCatalogDiff, diffEnumLabelHazards, renderReversibleDDL)
 import Hylo.Migrate.Linter
   ( LintConfig (..)
   , LintError (..)
@@ -323,12 +323,15 @@ makeMigrationFromCatalogsWithConfigTimestampEither cfg now s0 s1 dir = do
       let (rawUp, rawDown) = renderReversibleDDL diff
           upSql = attachLockTimeoutPreamble rawUp
           downSql = attachLockTimeoutPreamble rawDown
+          enumHazards = diffEnumLabelHazards diff
       case lintMigrationSQLWith cfg upSql of
-        Left lintErrs -> pure (Left (MigrationLintError lintErrs))
-        Right () -> do
-          let ts = T.pack (formatTime defaultTimeLocale "%Y%m%d%H%M%S" now)
-          _ <- persistMigrationFiles dir ts upSql downSql
-          pure (Right (upSql, downSql))
+        Left lintErrs -> pure (Left (MigrationLintError (enumHazards ++ lintErrs)))
+        Right ()
+          | not (null enumHazards) -> pure (Left (MigrationLintError enumHazards))
+          | otherwise -> do
+              let ts = T.pack (formatTime defaultTimeLocale "%Y%m%d%H%M%S" now)
+              _ <- persistMigrationFiles dir ts upSql downSql
+              pure (Right (upSql, downSql))
     shadowFailure ->
       pure (Left (MigrationShadowError shadowFailure))
 

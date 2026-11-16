@@ -97,6 +97,7 @@ data ColumnType
   | TypeUuid
   | TypeVector (Maybe Int)
   | TypeCustom Text
+  | EnumType !Text ![Text]
   deriving (Eq, Ord, Show, Generic, NFData)
 
 -- | Column nullability constraint.
@@ -199,6 +200,9 @@ data DDLStatement
   | AddConstraintStmt !TableName !ConstraintDef !Bool
   | ValidateConstraintStmt !TableName !ConstraintName
   | DropConstraintStmt !TableName !ConstraintName !Bool
+  | CreateEnumTypeStmt !Text ![Text]
+  | AlterEnumTypeAddValueStmt !Text !Text
+  | DropEnumTypeStmt !Text !Bool
   | RawDDLStmt !Text
   deriving (Eq, Ord, Show, Generic, NFData)
 
@@ -222,6 +226,7 @@ renderColumnType = \case
   TypeVector Nothing -> "vector"
   TypeVector (Just dim) -> "vector(" <> T.pack (show dim) <> ")"
   TypeCustom t -> t
+  EnumType ty _ -> "\"" <> ty <> "\""
 
 -- | Render a column definition line for CREATE TABLE or ALTER TABLE ADD COLUMN.
 renderColumnDef :: ColumnDef -> Text
@@ -342,6 +347,17 @@ renderDDLStatement = \case
           <> "\""
           <> cascadeStr
           <> ";"
+  CreateEnumTypeStmt ty labels ->
+    "CREATE TYPE \""
+      <> ty
+      <> "\" AS ENUM ("
+      <> T.intercalate ", " (map (\l -> "'" <> l <> "'") labels)
+      <> ");"
+  AlterEnumTypeAddValueStmt ty label ->
+    "ALTER TYPE \"" <> ty <> "\" ADD VALUE '" <> label <> "';"
+  DropEnumTypeStmt ty cascade ->
+    let cascadeStr = if cascade then " CASCADE" else ""
+     in "DROP TYPE \"" <> ty <> "\"" <> cascadeStr <> ";"
   RawDDLStmt raw -> raw
 
 -- | Render a table constraint into SQL snippet.

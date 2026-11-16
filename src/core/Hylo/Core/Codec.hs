@@ -1,7 +1,9 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- |
 Module      : Hylo.Core.Codec
@@ -52,6 +54,14 @@ module Hylo.Core.Codec
     -- * Phantom Key Codec
   , idCodec
 
+    -- * Enum Codecs (User Story 19)
+  , HyloCodec
+  , enumCodec
+  , boundedEnumCodec
+  , boundedEnumLabels
+  , camelToSnake
+  , enumColDef
+
     -- * Composite Tuple Codecs
   , pairCodec
   , tripleCodec
@@ -67,9 +77,11 @@ import qualified Data.ByteString as BS
 import Data.ByteString.Builder (Builder)
 import qualified Data.ByteString.Builder as Builder
 import qualified Data.ByteString.Lazy as BSL
+import Data.Char (isUpper, toLower)
 import Data.Int (Int32)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Word (Word32)
 import Hylo.Core.Context
   ( ColDef (..)
@@ -275,6 +287,80 @@ nullable vc =
 -- | Codec for phantom primary and foreign keys.
 idCodec :: ValueCodec a -> ValueCodec (Id table a)
 idCodec = dimap unId Id
+
+-- | Symmetric codec for a single column value (Hylo PRD naming).
+type HyloCodec a = ValueCodec a
+
+{- | Bidirectional codec for sum types via a @(label, constructor)@ lookup table.
+Encodes each constructor to its registered label as framed UTF-8 text and
+decodes labels back, failing descriptively on unregistered labels.
+-}
+enumCodec :: forall a. (Eq a) => [(Text, a)] -> HyloCodec a
+enumCodec pairs =
+  makeFramedValueCodec
+    ( \v ->
+        let bs = TE.encodeUtf8 (labelOf v)
+         in (fromIntegral (BS.length bs), Builder.byteString bs)
+    )
+    ( \bs -> case TE.decodeUtf8' bs of
+        Left _ -> Left "Invalid UTF-8 byte sequence in enum label"
+        Right t -> case lookup t pairs of
+          Just v -> Right v
+          Nothing ->
+            Left $
+              "Unknown enum label \""
+                <> t
+                <> "\". Registered labels are: "
+                <> T.intercalate ", " (map fst pairs)
+    )
+  where
+    labelOf v = case [l | (l, x) <- pairs, x == v] of
+      (l : _) -> l
+      [] ->
+        errorWithoutStackTrace
+          "enumCodec: value has no registered label in the (label, constructor) table"
+
+{- | Codec for bounded sum types deriving the label table from
+@[minBound .. maxBound]@ via snake_case-lowered 'show' labels.
+-}
+boundedEnumCodec :: forall a. (Bounded a, Enum a, Show a, Eq a) => HyloCodec a
+boundedEnumCodec = enumCodec [(camelToSnake (T.pack (show x)), x) | x <- [minBound .. maxBound]]
+
+-- | Registered snake_case labels of a bounded sum type in constructor order.
+boundedEnumLabels :: forall a. (Bounded a, Enum a, Show a) => [Text]
+boundedEnumLabels = map (camelToSnake . T.pack . show) ([minBound .. maxBound] :: [a])
+
+{- | Convert a constructor name to a snake_case label
+(e.g. @"AwaitingPickup" -> "awaiting_pickup"@).
+-}
+camelToSnake :: Text -> Text
+camelToSnake txt = case T.unpack txt of
+  [] -> ""
+  (c : cs) -> T.pack (toLower c : go cs)
+  where
+    go [] = []
+    go (c : rest)
+      | isUpper c = '_' : toLower c : go rest
+      | otherwise = c : go rest
+
+{- | Construct an enum column descriptor with 'colIsEnum' set and the
+registered labels attached. The column's SQL type is the enum type name.
+The codec argument is advisory (documentation/round-trip parity); label
+fidelity is carried by the label list.
+-}
+enumColDef :: HyloCodec a -> [Text] -> Text -> ColDef a
+enumColDef _codec labels name =
+  ColDef
+    { colName = name
+    , colLogicalType = LCustom name
+    , colIsNullable = False
+    , colIsPrimaryKey = False
+    , colIsOptimisticLock = False
+    , colDescription = Nothing
+    , colSqlType = name
+    , colIsEnum = True
+    , colEnumLabels = labels
+    }
 
 -- | Pair composite codec.
 pairCodec :: ValueCodec a -> ValueCodec b -> Codec (a, b) (a, b)

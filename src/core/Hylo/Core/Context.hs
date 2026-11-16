@@ -155,6 +155,8 @@ data ColDef a = ColDef
   , colIsOptimisticLock :: !Bool
   , colDescription :: !(Maybe Text)
   , colSqlType :: !Text
+  , colIsEnum :: !Bool
+  , colEnumLabels :: ![Text]
   }
   deriving (Eq, Show)
 

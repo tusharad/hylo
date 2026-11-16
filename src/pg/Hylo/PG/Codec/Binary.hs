@@ -88,6 +88,7 @@ module Hylo.PG.Codec.Binary
   , arrayCol
   , rangeCol
   , idCol
+  , pgEnumCodec
 
     -- * PostgreSQL Type OIDs
   , boolOid
@@ -155,6 +156,7 @@ import Hylo.Core.Codec
   , ValueCodec
   , decodeFail
   , dimap
+  , enumCodec
   , field
   , fieldWith
   , getBytes
@@ -545,6 +547,13 @@ rangeCol = rangeCodec
 
 idCol :: ValueCodec a -> ValueCodec (Id table a)
 idCol = idCodec
+
+{- | PostgreSQL enum column codec via the text-protocol OID fallback.
+PostgreSQL transmits enum values as framed UTF-8 label text regardless of
+the enum type's runtime OID, so the label-table codec maps 1:1 onto the wire.
+-}
+pgEnumCodec :: (Eq a) => [(Text, a)] -> ValueCodec a
+pgEnumCodec = enumCodec
 
 --------------------------------------------------------------------------------
 -- Table Codec & Positional JSON Array Decoding

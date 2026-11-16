@@ -7,6 +7,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -34,6 +35,8 @@ module Hylo.Core.Table
   , primaryKey
   , foreignKey
   , optimisticLockColumn
+  , enumCol
+  , sumTypeCol
   , describeCol
   , eraseColDef
   , ColDef (..)
@@ -55,6 +58,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+import Hylo.Core.Codec (HyloCodec, boundedEnumCodec, boundedEnumLabels, enumColDef)
 import Hylo.Core.Context
   ( ColDef (..)
   , ColSpec
@@ -195,6 +199,8 @@ column name lt =
     , colIsOptimisticLock = False
     , colDescription = Nothing
     , colSqlType = renderLogicalType lt
+    , colIsEnum = False
+    , colEnumLabels = []
     }
 
 -- | Construct a nullable column descriptor.
@@ -208,6 +214,8 @@ nullableColumn name lt =
     , colIsOptimisticLock = False
     , colDescription = Nothing
     , colSqlType = renderLogicalType lt
+    , colIsEnum = False
+    , colEnumLabels = []
     }
 
 -- | Construct a primary key column descriptor.
@@ -221,6 +229,8 @@ primaryKey name lt =
     , colIsOptimisticLock = False
     , colDescription = Nothing
     , colSqlType = renderLogicalType lt
+    , colIsEnum = False
+    , colEnumLabels = []
     }
 
 -- | Construct a foreign key column descriptor.
@@ -234,6 +244,8 @@ foreignKey name lt =
     , colIsOptimisticLock = False
     , colDescription = Nothing
     , colSqlType = renderLogicalType lt
+    , colIsEnum = False
+    , colEnumLabels = []
     }
 
 -- | Construct an optimistic locking version column descriptor.
@@ -247,8 +259,22 @@ optimisticLockColumn name lt =
     , colIsOptimisticLock = True
     , colDescription = Nothing
     , colSqlType = renderLogicalType lt
+    , colIsEnum = False
+    , colEnumLabels = []
     }
 
 -- | Attach an AI/documentation description to a column specification.
 describeCol :: Text -> ColDef a -> ColDef a
 describeCol desc colDef = colDef {colDescription = Just desc}
+
+{- | Define a native PostgreSQL @ENUM@ column for a sum type with explicit
+@(label, constructor)@ pairs from the codec.
+-}
+enumCol :: HyloCodec a -> [Text] -> Text -> ColDef a
+enumCol = enumColDef
+
+{- | Define a native PostgreSQL @ENUM@ column deriving labels from a bounded
+sum type via 'boundedEnumCodec' (snake_case lowered constructor names).
+-}
+sumTypeCol :: forall a. (Bounded a, Enum a, Show a, Eq a) => Text -> ColDef a
+sumTypeCol = enumColDef boundedEnumCodec (boundedEnumLabels @a)
