@@ -36,6 +36,7 @@ import qualified Hylo.PG.Streaming.CursorSpec as CursorSpec
 import qualified Hylo.PG.Transaction.RetrySpec as RetrySpec
 import qualified Hylo.PG.VectorSpec as VectorSpec
 import qualified Hylo.SQL.BuilderSpec as BuilderSpec
+import qualified Hylo.SQLiteSpec as SQLiteSpec
 import Test.Hspec
 
 main :: IO ()
@@ -68,4 +69,5 @@ main = hspec $ do
   ConnectionSpec.spec
   SelectableSpec.spec
   RedisCacheSpec.spec
+  SQLiteSpec.spec
   RealPostgresSpec.spec

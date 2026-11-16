@@ -27,6 +27,7 @@ module Hylo.Core.Query.Monad
   , limit
   , offset
   , leftJoin
+  , optional
   , OrderBy (..)
   , OrderSpec (..)
   , OrderDirection (..)
@@ -124,6 +125,14 @@ leftJoin schema onCondFn = Query $ \s ->
           , qsRelations = qsRelations s ++ [binding]
           }
    in (nullableRec, s')
+
+-- | Optional left join lifting fields to 'NullableTable' (synonym for 'leftJoin').
+optional ::
+  Table table =>
+  TableSchema table ->
+  (NullableTable (table 'Expr) -> QExpr Bool) ->
+  Query db (NullableTable (table 'Expr))
+optional = leftJoin
 
 -- | Append a filter constraint to the active Query context.
 where_ :: QExpr Bool -> Query db ()

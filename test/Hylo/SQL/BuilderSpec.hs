@@ -29,7 +29,6 @@ import Data.Time (UTCTime (..), fromGregorian, secondsToDiffTime)
 import GHC.Generics (Generic)
 import Hylo.Core
 import Hylo.MySQL.Compiler (compileMySQLQuery)
-import Hylo.PG.Compiler.Lateral (NestedList (..), many)
 import Hylo.SQL
 import Test.Hspec
 import Test.QuickCheck

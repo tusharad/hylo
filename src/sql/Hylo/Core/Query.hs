@@ -34,6 +34,7 @@ module Hylo.Core.Query
   , limit
   , offset
   , leftJoin
+  , optional
   , ScopeId (..)
   , formatScope
   , generateScopes
@@ -62,6 +63,9 @@ module Hylo.Core.Query
 
     -- * Common Table Expressions & Recursive Graphs
   , module Hylo.SQL.Query.Recursive
+
+    -- * Correlated Subqueries & Lateral Collections
+  , module Hylo.SQL.Compiler.Lateral
 
     -- * Keyset Pagination
   , module Hylo.Core.Query.Pagination
@@ -136,6 +140,7 @@ import Hylo.Core.Query.Monad
   , leftJoin
   , limit
   , offset
+  , optional
   , runQuery
   , where_
   )
@@ -176,6 +181,7 @@ import Hylo.SQL.Builder
   , previewQuery
   , quoteIdentifier
   )
+import Hylo.SQL.Compiler.Lateral (NestedList (..), SupportsLateralSubqueries (..), many)
 import Hylo.SQL.Query.Aggregate
 import Hylo.SQL.Query.Recursive
 import Hylo.SQL.Query.Window

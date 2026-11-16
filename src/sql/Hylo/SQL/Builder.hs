@@ -65,6 +65,7 @@ module Hylo.SQL.Builder
   , interpolateMarker
   ) where
 
+import Control.Applicative ((<|>))
 import Control.DeepSeq (NFData (..))
 import Control.Monad (forM)
 import Control.Monad.Trans.State.Strict (State, get, put, runState)
@@ -243,17 +244,23 @@ freshScopeAlias = do
 
 -- | Allocate or retrieve a deterministic alias (t0, t1...) mapped to an input relation identifier.
 allocateScopeAlias :: Text -> SqlBuilderM Text
-allocateScopeAlias orig = do
+allocateScopeAlias orig = allocateScopeAliasFor orig orig
+
+-- | Allocate or retrieve a deterministic alias mapped to an input relation identifier and optional table name.
+allocateScopeAliasFor :: Text -> Text -> SqlBuilderM Text
+allocateScopeAliasFor orig tName = do
   st <- get
   case Map.lookup orig (sbsAliasMap st) of
     Just mapped -> pure mapped
     Nothing -> do
       let idx = sbsScopeCount st
           newAlias = "t" <> T.pack (show idx)
+          m1 = Map.insert orig newAlias (sbsAliasMap st)
+          m2 = if Map.member tName m1 then m1 else Map.insert tName newAlias m1
       put
         st
           { sbsScopeCount = idx + 1
-          , sbsAliasMap = Map.insert orig newAlias (sbsAliasMap st)
+          , sbsAliasMap = m2
           }
       pure newAlias
 
@@ -398,7 +405,7 @@ compileExpr d expr =
 buildFromItem :: Dialect -> FromItem -> SqlBuilderM Builder
 buildFromItem d = \case
   FromTable t origAlias -> do
-    mappedAlias <- allocateScopeAlias origAlias
+    mappedAlias <- allocateScopeAliasFor origAlias t
     let tQuoted = quoteIdentifier d t
         aQuoted = quoteIdentifier d mappedAlias
     pure (B.fromText (tQuoted <> " AS " <> aQuoted))
@@ -492,23 +499,30 @@ buildQueryParts d rawProjections st = do
   -- 1. Flatten joins and build FROM clause (this assigns t0, t1... in sbsAliasMap)
   let (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
 
-  mFromB <- case mFrom of
-    Nothing -> case qsLaterals st of
-      [] -> pure Nothing
-      (l : ls) -> do
-        let base = FromTable (lbAlias l) (lbAlias l)
-            item = foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) base ls
-        Just <$> buildFromItem d item
-    Just baseItem -> do
-      let withLats =
-            foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) baseItem (qsLaterals st)
-      Just <$> buildFromItem d withLats
+  mFromB <- case d of
+    SQLiteDialect -> case mFrom of
+      Nothing -> pure Nothing
+      Just baseItem -> Just <$> buildFromItem d baseItem
+    _ -> case mFrom of
+      Nothing -> case qsLaterals st of
+        [] -> pure Nothing
+        (l : ls) -> do
+          let base = FromTable (lbAlias l) (lbAlias l)
+              item = foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) base ls
+          Just <$> buildFromItem d item
+      Just baseItem -> do
+        let withLats =
+              foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) baseItem (qsLaterals st)
+        Just <$> buildFromItem d withLats
 
   -- 2. Build Projections (rewriting column aliases to t0, t1... and applying dialect quoting)
-  builderState <- get
-  let projTexts = map (rewriteProjection d (sbsAliasMap builderState)) rawProjections
-      selectClause =
-        "SELECT " <> B.fromText (if null projTexts then "1" else T.intercalate ", " projTexts)
+  projBuilders <- buildProjectionList d rawProjections st
+  let selectClause =
+        "SELECT "
+          <> ( if null projBuilders
+                 then "1"
+                 else foldl1 (\acc next -> acc <> ", " <> next) projBuilders
+             )
 
   let fromClause = case mFromB of
         Nothing -> ""
@@ -524,6 +538,8 @@ buildQueryParts d rawProjections st = do
             [c] -> c
             (c : cs) -> foldl (\acc next -> acc <> " AND " <> next) c cs
       pure (" WHERE " <> combined)
+
+  builderState <- get
 
   -- 4. GROUP BY clause
   let groupByClause = case qsGroupBy st of
@@ -597,13 +613,145 @@ formatAggExprForDialect SQLiteDialect agg
        in "COALESCE(json_group_array(json_array(" <> inner <> ")), '[]')"
   | otherwise = agg
 
--- | Extract column arguments inside @jsonb_build_array(...)@.
+-- | Extract column arguments inside @jsonb_build_array(...)@ with balanced parentheses.
 extractBuildArrayArgs :: Text -> Text
 extractBuildArrayArgs t =
   let (_, after) = T.breakOn "jsonb_build_array(" t
       rest = T.drop (T.length "jsonb_build_array(") after
-      (args, _) = T.breakOn ")" rest
-   in args
+   in takeBalancedParens rest
+  where
+    takeBalancedParens = go (1 :: Int) ""
+    go 0 acc _ = acc
+    go _ acc "" = acc
+    go d acc txt = case T.uncons txt of
+      Nothing -> acc
+      Just (c, cs)
+        | c == '(' -> go (d + 1) (T.snoc acc c) cs
+        | c == ')' ->
+            if d == 1
+              then acc
+              else go (d - 1) (T.snoc acc c) cs
+        | otherwise -> go d (T.snoc acc c) cs
+
+-- | Split comma-separated arguments at top level (respecting parentheses depth).
+splitColList :: Text -> [Text]
+splitColList = go (0 :: Int) [] ""
+  where
+    go _ acc cur "" = reverse (if T.null (T.strip cur) then acc else T.strip cur : acc)
+    go depth acc cur txt = case T.uncons txt of
+      Nothing -> reverse (if T.null (T.strip cur) then acc else T.strip cur : acc)
+      Just (c, rest)
+        | c == '(' -> go (depth + 1) acc (T.snoc cur c) rest
+        | c == ')' -> go (max 0 (depth - 1)) acc (T.snoc cur c) rest
+        | c == ',' && depth == 0 ->
+            go 0 (T.strip cur : acc) "" rest
+        | otherwise -> go depth acc (T.snoc cur c) rest
+
+-- | Build projections list, lowering correlated lateral subqueries for SQLite.
+buildProjectionList :: Dialect -> [Text] -> QueryState -> SqlBuilderM [Builder]
+buildProjectionList d rawProjections st = case d of
+  SQLiteDialect -> do
+    let latMap = Map.fromList [(lbAlias lb, lb) | lb <- qsLaterals st]
+    forM rawProjections $ \rawProj -> do
+      case findMatchingLateral rawProj latMap of
+        Just lb -> buildSQLiteScalarSubquery d lb
+        Nothing -> do
+          builderState <- get
+          pure (B.fromText (rewriteProjection d (sbsAliasMap builderState) rawProj))
+  _ -> do
+    builderState <- get
+    pure
+      [B.fromText (rewriteProjection d (sbsAliasMap builderState) rawProj) | rawProj <- rawProjections]
+
+-- | Check if a raw projection matches a lateral binding alias (e.g. "lat_0".*, "lat_0", lat_0.*).
+findMatchingLateral :: Text -> Map Text LateralBinding -> Maybe LateralBinding
+findMatchingLateral rawProj latMap =
+  let clean = T.dropAround (== '"') rawProj
+      prefix = fst (T.breakOn "." clean)
+      direct = fst (T.breakOn "." rawProj)
+      cleanDirect = T.dropAround (== '"') direct
+   in Map.lookup prefix latMap
+        <|> Map.lookup cleanDirect latMap
+        <|> Map.lookup clean latMap
+
+-- | Build a correlated scalar subquery for SQLite 3.38+ using json_group_array and json_array.
+buildSQLiteScalarSubquery :: Dialect -> LateralBinding -> SqlBuilderM Builder
+buildSQLiteScalarSubquery d (LateralBinding _ fallbackSql mAST) = case mAST of
+  Nothing -> pure (B.fromText ("COALESCE((" <> fallbackSql <> "), '[]')"))
+  Just (rawAggExpr, childSt) -> do
+    outerSt <- get
+
+    -- 1. Flatten child relations and build child FROM item (allocating child scope aliases)
+    let (mChildFrom, childWherePreds) = flattenJoins (qsRelations childSt) (qsPredicates childSt)
+
+    mChildFromB <- case mChildFrom of
+      Nothing -> pure ""
+      Just fItem -> do
+        fb <- buildFromItem d fItem
+        pure (" FROM " <> fb)
+
+    -- 2. Build child projections for json_array(...)
+    let childLatMap = Map.fromList [(lbAlias lb, lb) | lb <- qsLaterals childSt]
+        rawArgs = extractBuildArrayArgs rawAggExpr
+        rawArgList = if T.null rawArgs then [] else splitColList rawArgs
+
+    childProjBuilders <- forM rawArgList $ \rawArg -> do
+      case findMatchingLateral rawArg childLatMap of
+        Just nestedLb -> do
+          nestedSubqueryB <- buildSQLiteScalarSubquery d nestedLb
+          pure ("json(" <> nestedSubqueryB <> ")")
+        Nothing -> do
+          currSt <- get
+          pure (B.fromText (rewriteProjection d (sbsAliasMap currSt) (T.strip rawArg)))
+
+    let jsonArrayArgs = case childProjBuilders of
+          [] -> ""
+          [b] -> b
+          (b : bs) -> foldl (\acc next -> acc <> ", " <> next) b bs
+        aggExpr = "json_group_array(json_array(" <> jsonArrayArgs <> "))"
+
+    -- 3. Build child WHERE clause
+    childWhereClause <- case childWherePreds of
+      [] -> pure ""
+      ps -> do
+        condBuilders <- mapM (buildExpr d) ps
+        let combined = case condBuilders of
+              [] -> ""
+              [c] -> c
+              (c : cs) -> foldl (\acc next -> acc <> " AND " <> next) c cs
+        pure (" WHERE " <> combined)
+
+    -- 4. Build child ORDER BY clause
+    currStForOrder <- get
+    let childOrderByClause = case qsOrderBy childSt of
+          [] -> ""
+          orders ->
+            let rewritten = map (rewriteProjection d (sbsAliasMap currStForOrder)) orders
+             in " ORDER BY " <> B.fromText (T.intercalate ", " rewritten)
+
+    -- 5. Build child LIMIT and OFFSET
+    let childLimitClause = case qsLimit childSt of
+          Nothing -> ""
+          Just n -> " LIMIT " <> B.fromText (T.pack (show n))
+        childOffsetClause = case qsOffset childSt of
+          Nothing -> ""
+          Just n -> " OFFSET " <> B.fromText (T.pack (show n))
+        childLimitOffsetClause = childLimitClause <> childOffsetClause
+
+    -- 6. Restore outer alias map so child relation aliases don't leak into sibling queries,
+    -- while keeping accumulated parameters (sbsParams) and scope count (sbsScopeCount).
+    finalChildSt <- get
+    put finalChildSt {sbsAliasMap = sbsAliasMap outerSt}
+
+    let innerSql =
+          "SELECT "
+            <> aggExpr
+            <> mChildFromB
+            <> childWhereClause
+            <> childOrderByClause
+            <> childLimitOffsetClause
+
+    pure ("COALESCE((" <> innerSql <> "), '[]')")
 
 -- | Build a correlated LATERAL subquery inside SqlBuilderM, sharing parameters and scopes.
 buildLateralSubquery :: Dialect -> Text -> QueryState -> SqlBuilderM Builder
@@ -641,6 +789,21 @@ buildLateralSubquery d rawAggExpr childSt = do
             (c : cs) -> foldl (\acc next -> acc <> " AND " <> next) c cs
       pure (" WHERE " <> combined)
 
+  currStForOrder <- get
+  let orderByClause = case qsOrderBy childSt of
+        [] -> ""
+        orders ->
+          let rewritten = map (rewriteProjection d (sbsAliasMap currStForOrder)) orders
+           in " ORDER BY " <> B.fromText (T.intercalate ", " rewritten)
+
+  let limitClause = case qsLimit childSt of
+        Nothing -> ""
+        Just n -> " LIMIT " <> B.fromText (T.pack (show n))
+      offsetClause = case qsOffset childSt of
+        Nothing -> ""
+        Just n -> " OFFSET " <> B.fromText (T.pack (show n))
+      limitOffsetClause = limitClause <> offsetClause
+
   let fromClause = case mFromB of
         Nothing -> ""
         Just fb -> " FROM " <> fb
@@ -648,7 +811,8 @@ buildLateralSubquery d rawAggExpr childSt = do
   finalSt <- get
   put finalSt {sbsAliasMap = sbsAliasMap builderSt}
 
-  pure ("SELECT " <> B.fromText aggExpr <> fromClause <> whereClause)
+  pure
+    ("SELECT " <> B.fromText aggExpr <> fromClause <> whereClause <> orderByClause <> limitOffsetClause)
 
 -- | Compile a list of CTE bindings within SqlBuilderM, sharing parameter and scope counters.
 buildCTEs :: Dialect -> [CTEBinding] -> SqlBuilderM Builder
@@ -712,22 +876,29 @@ buildCTEQueryParts d rawProjections st = do
 
   let (mFrom, wherePreds) = flattenJoins (qsRelations st) (qsPredicates st)
 
-  mFromB <- case mFrom of
-    Nothing -> case qsLaterals st of
-      [] -> pure Nothing
-      (l : ls) -> do
-        let base = FromTable (lbAlias l) (lbAlias l)
-            item = foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) base ls
-        Just <$> buildFromItem d item
-    Just baseItem -> do
-      let withLats =
-            foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) baseItem (qsLaterals st)
-      Just <$> buildFromItem d withLats
+  mFromB <- case d of
+    SQLiteDialect -> case mFrom of
+      Nothing -> pure Nothing
+      Just baseItem -> Just <$> buildFromItem d baseItem
+    _ -> case mFrom of
+      Nothing -> case qsLaterals st of
+        [] -> pure Nothing
+        (l : ls) -> do
+          let base = FromTable (lbAlias l) (lbAlias l)
+              item = foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) base ls
+          Just <$> buildFromItem d item
+      Just baseItem -> do
+        let withLats =
+              foldl (\acc (LateralBinding a sql mast) -> LeftJoinLateral acc sql a mast) baseItem (qsLaterals st)
+        Just <$> buildFromItem d withLats
 
-  bSt <- get
-  let projTexts = map (rewriteProjection d (sbsAliasMap bSt)) rawProjections
-      selectClause =
-        "SELECT " <> B.fromText (if null projTexts then "1" else T.intercalate ", " projTexts)
+  projBuilders <- buildProjectionList d rawProjections st
+  let selectClause =
+        "SELECT "
+          <> ( if null projBuilders
+                 then "1"
+                 else foldl1 (\acc next -> acc <> ", " <> next) projBuilders
+             )
 
   let fromClause = case mFromB of
         Nothing -> ""
@@ -742,6 +913,8 @@ buildCTEQueryParts d rawProjections st = do
             [c] -> c
             (c : cs) -> foldl (\acc next -> acc <> " AND " <> next) c cs
       pure (" WHERE " <> combined)
+
+  bSt <- get
 
   let groupByClause = case qsGroupBy st of
         [] -> ""
