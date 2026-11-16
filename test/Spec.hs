@@ -38,6 +38,7 @@ import qualified Hylo.PG.Transaction.RetrySpec as RetrySpec
 import qualified Hylo.PG.VectorSpec as VectorSpec
 import qualified Hylo.SQL.BuilderSpec as BuilderSpec
 import qualified Hylo.SQLiteSpec as SQLiteSpec
+import qualified Hylo.Test.Properties as PropertiesSpec
 import Test.Hspec
 
 main :: IO ()
@@ -72,4 +73,5 @@ main = hspec $ do
   SelectableSpec.spec
   RedisCacheSpec.spec
   SQLiteSpec.spec
+  PropertiesSpec.spec
   RealPostgresSpec.spec

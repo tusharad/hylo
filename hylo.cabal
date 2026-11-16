@@ -291,6 +291,8 @@ test-suite hylo-test
       Hylo.SQL.BuilderSpec
       Hylo.SQLiteSpec
       Hylo.Test.Docker
+      Hylo.Test.Gen
+      Hylo.Test.Properties
       Hylo.Test.ShouldNotTypecheck
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
@@ -306,7 +308,9 @@ test-suite hylo-test
     , hasql >=1.6 && <1.10
     , hasql-pool >=1.0 && <2
     , hasql-transaction >=1.1 && <2
+    , hedgehog >=1.0 && <2
     , hspec >=2.11
+    , hspec-hedgehog >=0.1 && <1
     , hylo
     , hylo:hylo-core
     , hylo:hylo-mysql
