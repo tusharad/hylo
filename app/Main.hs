@@ -13,10 +13,13 @@ Maintainer  : tusharadhatrao@gmail.com
 module Main (main) where
 
 import Control.Exception (handle)
+import Control.Monad (forM_)
 import Data.Int (Int64)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Data.Time (diffUTCTime, formatTime, getCurrentTime)
+import Data.Time.Format (defaultTimeLocale)
 import Hylo.AI.Context.Exporter
   ( AiContextConfig (..)
   , defaultAiContextConfig
@@ -25,6 +28,16 @@ import Hylo.AI.Context.Exporter
   , exportLlmsTxt
   )
 import Hylo.Core
+import Hylo.Migrate.Runner.Apply
+  ( MigrationRecord (..)
+  , applyMigrationWith
+  , ensureMigrationsTable
+  , listApplied
+  , listPending
+  , postgresBackend
+  , rollbackLastMigration
+  , versionOfMigrationFile
+  )
 import Hylo.Migrate.Runner.Live
   ( MigrationError (..)
   , makeMigration
@@ -33,7 +46,7 @@ import Hylo.PG.Connection (createPool)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
-import System.FilePath ((</>))
+import System.FilePath (takeFileName, (</>))
 import Text.Read (readMaybe)
 
 -- | Demo table: user accounts with optimistic locking.
@@ -145,6 +158,13 @@ main = do
     ["migrate", "make", "--conn", connStr] -> runMake connStr "migrations"
     ["migrate", "make", "--conn", connStr, "--dir", dir] -> runMake connStr dir
     ["migrate", "make", "--dir", dir, "--conn", connStr] -> runMake connStr dir
+    ("migrate" : sub : rest)
+      | sub `elem` ["run", "rollback", "status"] ->
+          case parseMigrateFlags rest of
+            Right cfg -> runMigrateSubCommand sub cfg
+            Left err -> do
+              putStrLn err
+              printUsage
     ("ai-context" : rest) ->
       case parseAiFlags rest of
         Right cfg -> runAiContext cfg
@@ -173,13 +193,138 @@ main = do
     handleErr (MigrationIntrospectError err) = do
       putStrLn $ "Migration halted: failed to introspect database:\n" ++ show err
       exitFailure
+    handleErr (MigrationExecutionError err) = do
+      putStrLn $ "Migration execution failed:\n" ++ T.unpack err
+      exitFailure
+    handleErr (MigrationHistoryError err) = do
+      putStrLn $ "Migration history access failed:\n" ++ T.unpack err
+      exitFailure
 
     printUsage = do
       putStrLn "Hylo — Type-Safe, High-Performance ORM for Haskell"
       putStrLn ""
       putStrLn "Usage:"
       putStrLn "  hylo migrate make [--conn <connection-string>] [--dir <migrations-dir>]"
+      putStrLn "  hylo migrate run [--conn <connection-string>] [--dir <migrations-dir>] [--force]"
+      putStrLn "  hylo migrate rollback [--conn <connection-string>] [--dir <migrations-dir>]"
+      putStrLn "  hylo migrate status [--conn <connection-string>] [--dir <migrations-dir>]"
       putStrLn "  hylo ai-context [--dir <output-dir>] [--tables <table1,table2,...>] [--budget <tokens>]"
+
+-- | CLI flags shared by @migrate run@, @migrate rollback@, and @migrate status@.
+data MigrateFlags = MigrateFlags
+  { mfConn :: !String
+  , mfDir :: !FilePath
+  , mfForce :: !Bool
+  }
+
+-- | Default migration flags for @parseMigrateFlags@.
+defaultMigrateFlags :: MigrateFlags
+defaultMigrateFlags =
+  MigrateFlags
+    { mfConn = "postgresql://localhost:5432/hylo_test"
+    , mfDir = "migrations"
+    , mfForce = False
+    }
+
+-- | Parse @migrate run/rollback/status@ flags in any order into a 'MigrateFlags'.
+parseMigrateFlags :: [String] -> Either String MigrateFlags
+parseMigrateFlags = go defaultMigrateFlags
+  where
+    go cfg [] = Right cfg
+    go cfg ("--conn" : c : rest) = go cfg {mfConn = c} rest
+    go cfg ("--dir" : d : rest) = go cfg {mfDir = d} rest
+    go cfg ("--force" : rest) = go cfg {mfForce = True} rest
+    go _ (flag : _) = Left ("Unknown or incomplete migrate flag: " <> flag)
+
+-- | Dispatch @migrate run@, @migrate rollback@, and @migrate status@.
+runMigrateSubCommand :: String -> MigrateFlags -> IO ()
+runMigrateSubCommand sub cfg = handle handleErrTop $ case sub of
+  "run" -> runMigrateRun cfg
+  "rollback" -> runMigrateRollback cfg
+  "status" -> runMigrateStatus cfg
+  _ -> pure ()
+  where
+    handleErrTop err = do
+      putStrLn (migrationErrorMessage err)
+      exitFailure
+
+-- | Human-readable message for a 'MigrationError'.
+migrationErrorMessage :: MigrationError -> String
+migrationErrorMessage (MigrationLintError errs) = "Migration halted due to locking hazards:\n" ++ show errs
+migrationErrorMessage (MigrationShadowError res) = "Migration halted: shadow verification failed:\n" ++ show res
+migrationErrorMessage (MigrationIntrospectError err) = "Migration halted: failed to introspect database:\n" ++ show err
+migrationErrorMessage (MigrationExecutionError err) = "Migration execution failed:\n" ++ T.unpack err
+migrationErrorMessage (MigrationHistoryError err) = "Migration history access failed:\n" ++ T.unpack err
+
+{- | Apply every pending migration in timestamp order, printing per-migration
+status lines. Prints @Nothing to apply.@ and exits 0 when there are no
+pending migrations.
+-}
+runMigrateRun :: MigrateFlags -> IO ()
+runMigrateRun cfg = do
+  p <- createPool (T.pack (mfConn cfg))
+  ensureMigrationsTable p
+  pending <- listPending (mfDir cfg) p
+  if null pending
+    then putStrLn "Nothing to apply."
+    else forM_ pending $ \file -> do
+      t0 <- getCurrentTime
+      res <- applyMigrationWith (postgresBackend p) (mfForce cfg) file
+      t1 <- getCurrentTime
+      let ms = round (realToFrac (diffUTCTime t1 t0) * 1000 :: Double) :: Int64
+      case res of
+        Right () ->
+          TIO.putStrLn
+            ( "✓ "
+                <> T.pack (takeFileName file)
+                <> " applied ("
+                <> T.pack (show ms)
+                <> " ms)"
+            )
+        Left err -> do
+          TIO.putStrLn
+            ( "✗ "
+                <> T.pack (takeFileName file)
+                <> " failed: "
+                <> T.pack (migrationErrorMessage err)
+            )
+          exitFailure
+
+-- | Roll back the most recently applied migration and remove its record.
+runMigrateRollback :: MigrateFlags -> IO ()
+runMigrateRollback cfg = do
+  p <- createPool (T.pack (mfConn cfg))
+  res <- rollbackLastMigration p
+  case res of
+    Right () -> putStrLn "✓ rolled back last migration"
+    Left err -> do
+      putStrLn ("✗ rollback failed: " <> migrationErrorMessage err)
+      exitFailure
+
+-- | Print applied versus pending migration versions.
+runMigrateStatus :: MigrateFlags -> IO ()
+runMigrateStatus cfg = do
+  p <- createPool (T.pack (mfConn cfg))
+  ensureMigrationsTable p
+  applied <- listApplied p
+  pending <- listPending (mfDir cfg) p
+  putStrLn "Applied migrations:"
+  if null applied
+    then putStrLn "  (none)"
+    else forM_ applied $ \rec ->
+      TIO.putStrLn
+        ( "  "
+            <> mrVersion rec
+            <> "  "
+            <> mrChecksum rec
+            <> "  applied at "
+            <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S%QZ" (mrAppliedAt rec))
+        )
+  putStrLn "Pending migrations:"
+  if null pending
+    then putStrLn "  (none)"
+    else forM_ pending $ \file ->
+      TIO.putStrLn ("  " <> versionOfMigrationFile file <> "  " <> T.pack (takeFileName file))
 
 -- | Parse @ai-context@ flags in any order into an 'AiContextConfig'.
 parseAiFlags :: [String] -> Either String AiContextConfig

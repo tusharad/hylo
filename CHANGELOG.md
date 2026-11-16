@@ -10,6 +10,9 @@ and this project adheres to the
 
 ### Added
 
+- `Hylo.Migrate.Runner.Apply`: transactional DDL execution runner with migration history (User Story 20) — `MigrationRecord`, `_hylo_migrations` history table provisioning (`ensureMigrationsTable`), pending-file scanning in timestamp order (`listPending`), transactional `applyMigration` (BEGIN → DDL → history insert → COMMIT, full ROLLBACK on any failure), and `rollbackLastMigration` (execute recorded `down_sql` + delete record). The runner core is abstracted over a `MigrationBackend` with `postgresBackend` (Hasql) and `sqliteBackend` (in-memory) instances so the execution laws are verifiable against in-memory SQLite catalogs.
+- `hylo migrate run` (`--conn`, `--dir`, `--force`), `hylo migrate rollback`, and `hylo migrate status` CLI sub-commands with per-migration `[✓] <file> applied (N ms)` status lines and a `Nothing to apply.` fast path.
+- Linter pre-flight before every applied migration (`preflightLintConfig`), aborting with `MigrationLintError` on zero-downtime hazards unless `--force` is passed.
 - `Hylo.Core.Codec`: custom ADT / PostgreSQL `ENUM` codecs (User Story 19) — `HyloCodec` alias, `enumCodec :: Eq a => [(Text, a)] -> HyloCodec a` (framed UTF-8 label wire format with descriptive unknown-label failures), `boundedEnumCodec` / `boundedEnumLabels` deriving snake_case labels from `[minBound .. maxBound]`, `camelToSnake`, and the `enumColDef` column-descriptor smart constructor.
 - `Hylo.Core.Table`: `enumCol` and `sumTypeCol` combinators defining native PostgreSQL `ENUM` columns backed by label-table codecs.
 - `Hylo.Core.Context`: `ColDef` gains backward-compatible `colIsEnum :: Bool` and `colEnumLabels :: [Text]` fields (defaults `False` / `[]`).
