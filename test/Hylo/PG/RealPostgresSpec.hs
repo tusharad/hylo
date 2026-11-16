@@ -23,6 +23,7 @@ module Hylo.PG.RealPostgresSpec (spec) where
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as BSL
 import Data.Int (Int64)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Ratio ((%))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -58,12 +59,14 @@ import Hylo.Core
   , diffField
   , eraseColDef
   , foreignKey
+  , optimisticLock
+  , optimisticLockColumn
   , patchEntry
   , primaryKey
   , tableSchema
   , toId
   )
-import Hylo.Core.Changeset (OpKind (..), change)
+import Hylo.Core.Changeset (FieldError (..), OpKind (..), change)
 import Hylo.Core.Codec (Codec (..), field)
 import Hylo.Core.Expr (just, lit, (==.))
 import Hylo.Core.Query (Query, delete, each, leftJoin, where_)
@@ -835,6 +838,59 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
                     docs2 `shouldBe` []
                 _ -> expectationFailure ("Unexpected rows returned: " ++ show (length rows))
 
+  it
+    "User Story 2 Acceptance Criterion: updating a record with matching version increments version by 1; concurrent modification returns Left stale_object"
+    $ withTestPostgres
+    $ \p -> do
+      case poolActiveConnection p of
+        Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
+        Just _ -> do
+          _ <-
+            executeSql
+              p
+              "DROP TABLE IF EXISTS test_live_story2_accounts CASCADE; \
+              \CREATE TABLE test_live_story2_accounts ( \
+              \  id BIGSERIAL PRIMARY KEY, \
+              \  name TEXT NOT NULL, \
+              \  score BIGINT NOT NULL, \
+              \  version BIGINT NOT NULL DEFAULT 1 \
+              \);"
+
+          -- 1. Insert a record with version = 1
+          let initAcc :: Story2Account
+              initAcc = Story2Account (Id 1) "Alice" 100 1
+              csInsert = change @'InsertOp (diffTable (Story2Account (Id 0) "" 0 0) initAcc)
+          insRes <- runInsertChangesetIO p story2AccountSchema csInsert
+          insRes `shouldBe` Right (Story2Account (Id 1) "Alice" 100 1)
+
+          -- 2. First update with matching expected version = 1 (succeeds, increments version to 2)
+          let patch1 =
+                Story2Account
+                  { id = SetTo (Id 1)
+                  , name = SetTo "Alice Updated"
+                  , score = SetTo 250
+                  , version = Unchanged
+                  }
+              cs1 = optimisticLock "version" 1 (change @'UpdateOp patch1)
+          updRes1 <- runUpdateChangesetIO p story2AccountSchema cs1
+          updRes1 `shouldBe` Right (Story2Account (Id 1) "Alice Updated" 250 2)
+
+          -- 3. Second concurrent transaction attempting to update same row with stale version = 1
+          let patch2 =
+                Story2Account
+                  { id = SetTo (Id 1)
+                  , name = SetTo "Alice Concurrent"
+                  , score = SetTo 300
+                  , version = Unchanged
+                  }
+              cs2 = optimisticLock "version" 1 (change @'UpdateOp patch2)
+          updRes2 <- runUpdateChangesetIO p story2AccountSchema cs2
+          case updRes2 of
+            Left err -> do
+              changesetErrorFields err
+                `shouldBe` (FieldError "version" "stale_object" "Record was modified by another transaction" :| [])
+            Right _ -> expectationFailure "Expected stale_object error on concurrent conflicting update"
+
 -- -----------------------------------------------------------------------------
 -- User Story 12 Test Row Type & Codec
 -- -----------------------------------------------------------------------------
@@ -1163,3 +1219,70 @@ instance TableCodec Story1DocT where
       <$> jsonField
       <*> jsonField
       <*> jsonField
+
+-- -----------------------------------------------------------------------------
+-- User Story 2 Test Table & Codec (Optimistic Locking)
+-- -----------------------------------------------------------------------------
+
+data Story2AccountT (ctx :: Ctx) = Story2Account
+  { id :: !(Col ctx (Id Story2AccountT Int64))
+  , name :: !(Col ctx Text)
+  , score :: !(Col ctx Int64)
+  , version :: !(Col ctx Int64)
+  }
+  deriving (Generic)
+
+deriving instance Eq (Story2AccountT 'Result)
+deriving instance Show (Story2AccountT 'Result)
+deriving instance Eq (Story2AccountT 'Patch)
+deriving instance Show (Story2AccountT 'Patch)
+
+type Story2Account = Story2AccountT 'Result
+
+story2AccountSchema :: TableSchema Story2AccountT
+story2AccountSchema =
+  tableSchema "test_live_story2_accounts" $
+    Story2Account
+      { id = primaryKey "id" "bigint"
+      , name = column "name" "text"
+      , score = column "score" "bigint"
+      , version = optimisticLockColumn "version" "bigint"
+      }
+
+instance Table Story2AccountT where
+  toTableExpr alias m =
+    Story2Account
+      { id = colSpecExpr alias m.id
+      , name = colSpecExpr alias m.name
+      , score = colSpecExpr alias m.score
+      , version = colSpecExpr alias m.version
+      }
+  diffTable old new =
+    Story2Account
+      { id = diffField old.id new.id
+      , name = diffField old.name new.name
+      , score = diffField old.score new.score
+      , version = diffField old.version new.version
+      }
+  tableColDefs m =
+    [ eraseColDef m.id
+    , eraseColDef m.name
+    , eraseColDef m.score
+    , eraseColDef m.version
+    ]
+  patchEntries meta patch =
+    concat
+      [ patchEntry meta.id patch.id
+      , patchEntry meta.name patch.name
+      , patchEntry meta.score patch.score
+      , patchEntry meta.version patch.version
+      ]
+  tableOptimisticLock old = Just ("version", old.version)
+
+instance TableCodec Story2AccountT where
+  tableCodec =
+    Story2Account
+      <$> field (.id) (idCodec int64Codec)
+      <*> field (.name) textCodec
+      <*> field (.score) int64Codec
+      <*> field (.version) int64Codec

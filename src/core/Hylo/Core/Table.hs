@@ -28,6 +28,7 @@ module Hylo.Core.Table
   , nullableColumn
   , primaryKey
   , foreignKey
+  , optimisticLockColumn
   , describeCol
   , eraseColDef
   , ColDef (..)
@@ -81,6 +82,8 @@ class Table (table :: Ctx -> Type) where
   patchEntries _ _ = []
   dirtyFieldsTable :: table 'Patch -> Map Text Text
   dirtyFieldsTable _ = Map.empty
+  tableOptimisticLock :: table 'Result -> Maybe (Text, Int64)
+  tableOptimisticLock _ = Nothing
 
 -- | Erase the phantom type parameter of a column definition to '()'.
 eraseColDef :: ColDef a -> ColDef ()
@@ -150,6 +153,7 @@ column name lt =
     , colLogicalType = lt
     , colIsNullable = False
     , colIsPrimaryKey = False
+    , colIsOptimisticLock = False
     , colDescription = Nothing
     , colSqlType = renderLogicalType lt
     }
@@ -162,6 +166,7 @@ nullableColumn name lt =
     , colLogicalType = castLogicalType lt
     , colIsNullable = True
     , colIsPrimaryKey = False
+    , colIsOptimisticLock = False
     , colDescription = Nothing
     , colSqlType = renderLogicalType lt
     }
@@ -174,6 +179,7 @@ primaryKey name lt =
     , colLogicalType = lt
     , colIsNullable = False
     , colIsPrimaryKey = True
+    , colIsOptimisticLock = False
     , colDescription = Nothing
     , colSqlType = renderLogicalType lt
     }
@@ -186,6 +192,20 @@ foreignKey name lt =
     , colLogicalType = lt
     , colIsNullable = False
     , colIsPrimaryKey = False
+    , colIsOptimisticLock = False
+    , colDescription = Nothing
+    , colSqlType = renderLogicalType lt
+    }
+
+-- | Construct an optimistic locking version column descriptor.
+optimisticLockColumn :: Text -> LogicalType a -> ColDef a
+optimisticLockColumn name lt =
+  ColDef
+    { colName = name
+    , colLogicalType = lt
+    , colIsNullable = False
+    , colIsPrimaryKey = False
+    , colIsOptimisticLock = True
     , colDescription = Nothing
     , colSqlType = renderLogicalType lt
     }

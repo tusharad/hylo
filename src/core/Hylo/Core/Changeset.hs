@@ -31,6 +31,9 @@ module Hylo.Core.Changeset
   , emptyChangeset
   , change
   , withUniqueKey
+  , optimisticLock
+  , withOptimisticLock
+  , optimisticLockVersion
   , castChangesetOp
 
     -- * Differential Field Tracking
@@ -146,6 +149,7 @@ data Changeset (table :: Ctx -> Type) (op :: OpKind) = Changeset
   , changesetKey :: !Text
   , changesetValid :: !Bool
   , changesetParams :: !(Map Text Text)
+  , changesetOptimisticLock :: !(Maybe (Text, Int64))
   }
   deriving (Generic)
 
@@ -159,6 +163,7 @@ emptyChangeset patch =
     , changesetKey = ""
     , changesetValid = True
     , changesetParams = Map.empty
+    , changesetOptimisticLock = Nothing
     }
 
 -- | Synonym for 'emptyChangeset'.
@@ -168,6 +173,20 @@ change = emptyChangeset
 -- | Attach a simulated unique/primary key for conflict resolution and transaction logs.
 withUniqueKey :: Text -> Changeset table op -> Changeset table op
 withUniqueKey key cs = cs {changesetKey = key}
+
+-- | Attach an expected version to an update changeset for optimistic concurrency control.
+optimisticLock :: Text -> Int64 -> Changeset table op -> Changeset table op
+optimisticLock colName expectedVer cs =
+  cs {changesetOptimisticLock = Just (colName, expectedVer)}
+
+-- | Synonym for 'optimisticLock'.
+withOptimisticLock :: Text -> Int64 -> Changeset table op -> Changeset table op
+withOptimisticLock = optimisticLock
+
+-- | Attach an expected version without column name (inferred from schema metadata).
+optimisticLockVersion :: Int64 -> Changeset table op -> Changeset table op
+optimisticLockVersion expectedVer cs =
+  cs {changesetOptimisticLock = Just ("", expectedVer)}
 
 -- | Cast the phantom operation kind of a changeset.
 castChangesetOp :: Changeset table op -> Changeset table op'
@@ -179,6 +198,7 @@ castChangesetOp cs =
     , changesetKey = changesetKey cs
     , changesetValid = changesetValid cs
     , changesetParams = changesetParams cs
+    , changesetOptimisticLock = changesetOptimisticLock cs
     }
 
 --------------------------------------------------------------------------------
@@ -498,6 +518,7 @@ diffRecord schema old new =
     , changesetKey = tableName schema
     , changesetValid = True
     , changesetParams = Map.empty
+    , changesetOptimisticLock = tableOptimisticLock old
     }
 
 -- | Extract a map of dirty (modified) column names to their formatted textual values.

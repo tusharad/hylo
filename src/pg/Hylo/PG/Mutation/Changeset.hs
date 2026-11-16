@@ -66,17 +66,20 @@ import Control.DeepSeq (NFData (..))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Hylo.Backend.Capability (Postgres)
 import Hylo.Core.Changeset
   ( Changeset (..)
   , FieldError (..)
   )
-import Hylo.Core.Context (Ctx (..))
+import Hylo.Core.Context (ColDef (..), Ctx (..))
 import Hylo.Core.Query
-  ( findPrimaryKeyCol
+  ( findOptimisticLockCol
+  , findPrimaryKeyCol
   , renderInsertChangesetSQL
   , renderUpdateChangesetSQL
   )
@@ -315,7 +318,24 @@ updateChangesetWithRow schema codec wireBytes cs =
               (Right (Left (singleChangesetError fe)), st)
             Nothing ->
               let (sqlText, params) = renderUpdateChangesetSQL schema cs
-                  st' = st {txOperations = txOperations st ++ [OpMutate (sqlText, params)]}
+                  key = changesetKey cs
+                  tName = tableName schema
+                  pkCol = findPrimaryKeyCol schema
+                  entries = patchEntries (tableMeta schema) (changesetPatch cs)
+                  pkVal =
+                    if key /= "" && key /= tName
+                      then key
+                      else case [v | (c, ValSetTo v) <- entries, colName c == pkCol] of
+                        (v : _) -> v
+                        [] -> if key /= "" then key else "1"
+                  verStore = case changesetOptimisticLock cs of
+                    Just (_, expectedVer) -> [(tName <> "_ver_" <> pkVal, T.pack (show (expectedVer + 1)))]
+                    Nothing -> []
+                  st' =
+                    st
+                      { txOperations = txOperations st ++ [OpMutate (sqlText, params)]
+                      , txStore = verStore ++ txStore st
+                      }
                in if not (BS.null wireBytes)
                     then case decodeReturningRow codec wireBytes of
                       Left decodeErr ->
@@ -355,7 +375,24 @@ updateChangesetWithFallback schema fallback cs =
             (Right (Left (singleChangesetError fe)), st)
           Nothing ->
             let (sqlText, params) = renderUpdateChangesetSQL schema cs
-                st' = st {txOperations = txOperations st ++ [OpMutate (sqlText, params)]}
+                key = changesetKey cs
+                tName = tableName schema
+                pkCol = findPrimaryKeyCol schema
+                entries = patchEntries (tableMeta schema) (changesetPatch cs)
+                pkVal =
+                  if key /= "" && key /= tName
+                    then key
+                    else case [v | (c, ValSetTo v) <- entries, colName c == pkCol] of
+                      (v : _) -> v
+                      [] -> if key /= "" then key else "1"
+                verStore = case changesetOptimisticLock cs of
+                  Just (_, expectedVer) -> [(tName <> "_ver_" <> pkVal, T.pack (show (expectedVer + 1)))]
+                  Nothing -> []
+                st' =
+                  st
+                    { txOperations = txOperations st ++ [OpMutate (sqlText, params)]
+                    , txStore = verStore ++ txStore st
+                    }
              in (Right (Right fallback), st')
 
 --------------------------------------------------------------------------------
@@ -436,8 +473,33 @@ runUpdateChangesetIOWith pool schema codec cs =
       case res of
         Left txErr -> pure (Left (translateTxConstraintViolation schema cs txErr))
         Right [] ->
-          pure
-            (Left (singleChangesetError (FieldError "" "not_found" "UPDATE ... RETURNING * returned no rows")))
+          let optLockCol = case changesetOptimisticLock cs of
+                Just (c, _) -> if c /= "" then c else fromMaybe "version" (findOptimisticLockCol schema)
+                Nothing -> fromMaybe "" (findOptimisticLockCol schema)
+           in case changesetOptimisticLock cs of
+                Just _ ->
+                  pure
+                    ( Left
+                        ( singleChangesetError
+                            ( FieldError
+                                optLockCol
+                                "stale_object"
+                                "Record was modified by another transaction"
+                            )
+                        )
+                    )
+                Nothing ->
+                  let pkCol = findPrimaryKeyCol schema
+                   in pure
+                        ( Left
+                            ( singleChangesetError
+                                ( FieldError
+                                    pkCol
+                                    "not_found"
+                                    "Record not found for update"
+                                )
+                            )
+                        )
         Right (row : _) -> pure (Right row)
 
 --------------------------------------------------------------------------------
@@ -488,46 +550,67 @@ checkSimulatedConstraint schema cs st =
   let tName = tableName schema
       key = changesetKey cs
       pkCol = findPrimaryKeyCol schema
-   in if key /= "" && (tName, key) `elem` txStore st
-        then
-          let dbErr =
-                mockSqlStateErrorFull
-                  "23505"
-                  (tName <> "_" <> pkCol <> "_key")
-                  (Just "duplicate key value violates unique constraint")
-                  Nothing
-                  (Just tName)
-                  (Just pkCol)
-           in Just (translateChangesetDbError schema (changesetConstraints cs) dbErr)
-        else case key of
-          "sim_23505" ->
-            let dbErr =
-                  mockSqlStateErrorFull
-                    "23505"
-                    (tName <> "_unique_key")
-                    (Just "duplicate key")
-                    Nothing
-                    (Just tName)
-                    Nothing
-             in Just (translateChangesetDbError schema (changesetConstraints cs) dbErr)
-          "sim_23503" ->
-            let dbErr =
-                  mockSqlStateErrorFull
-                    "23503"
-                    (tName <> "_fkey")
-                    (Just "foreign key violation")
-                    Nothing
-                    (Just tName)
-                    Nothing
-             in Just (translateChangesetDbError schema (changesetConstraints cs) dbErr)
-          "sim_23001" ->
-            let dbErr =
-                  mockSqlStateErrorFull
-                    "23001"
-                    (tName <> "_restrict")
-                    (Just "restrict violation")
-                    Nothing
-                    (Just tName)
-                    Nothing
-             in Just (translateChangesetDbError schema (changesetConstraints cs) dbErr)
-          _ -> Nothing
+      entries = patchEntries (tableMeta schema) (changesetPatch cs)
+      pkVal =
+        if key /= "" && key /= tName
+          then key
+          else case [v | (c, ValSetTo v) <- entries, colName c == pkCol] of
+            (v : _) -> v
+            [] -> if key /= "" then key else "1"
+      optCol = case changesetOptimisticLock cs of
+        Just (c, _) -> if c /= "" then c else fromMaybe "version" (findOptimisticLockCol schema)
+        Nothing -> fromMaybe "version" (findOptimisticLockCol schema)
+   in case changesetOptimisticLock cs of
+        Just (_, expectedVer)
+          | key == "sim_stale" || key == "stale_object" ->
+              Just (FieldError optCol "stale_object" "Record was modified by another transaction")
+          | (tName <> "_ver_" <> pkVal, T.pack (show (expectedVer + 1))) `elem` txStore st ->
+              Just (FieldError optCol "stale_object" "Record was modified by another transaction")
+        _ ->
+          if key /= ""
+            && (tName, key) `elem` txStore st
+            && (case changesetOptimisticLock cs of Just _ -> False; Nothing -> True)
+            then
+              let dbErr =
+                    mockSqlStateErrorFull
+                      "23505"
+                      (tName <> "_" <> pkCol <> "_key")
+                      (Just "duplicate key value violates unique constraint")
+                      Nothing
+                      (Just tName)
+                      (Just pkCol)
+               in Just (translateChangesetDbError schema (changesetConstraints cs) dbErr)
+            else case key of
+              "sim_23505" ->
+                let dbErr =
+                      mockSqlStateErrorFull
+                        "23505"
+                        (tName <> "_unique_key")
+                        (Just "duplicate key")
+                        Nothing
+                        (Just tName)
+                        Nothing
+                 in Just (translateChangesetDbError schema (changesetConstraints cs) dbErr)
+              "sim_23503" ->
+                let dbErr =
+                      mockSqlStateErrorFull
+                        "23503"
+                        (tName <> "_fkey")
+                        (Just "foreign key violation")
+                        Nothing
+                        (Just tName)
+                        Nothing
+                 in Just (translateChangesetDbError schema (changesetConstraints cs) dbErr)
+              "sim_23001" ->
+                let dbErr =
+                      mockSqlStateErrorFull
+                        "23001"
+                        (tName <> "_restrict")
+                        (Just "restrict violation")
+                        Nothing
+                        (Just tName)
+                        Nothing
+                 in Just (translateChangesetDbError schema (changesetConstraints cs) dbErr)
+              "sim_stale" ->
+                Just (FieldError optCol "stale_object" "Record was modified by another transaction")
+              _ -> Nothing

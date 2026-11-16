@@ -96,6 +96,9 @@ module Hylo.Core
   , emptyChangeset
   , change
   , withUniqueKey
+  , optimisticLock
+  , withOptimisticLock
+  , optimisticLockVersion
   , castChangesetOp
   , ConstraintDeclaration (..)
   , constraintField
@@ -150,6 +153,7 @@ module Hylo.Core
   , nullableColumn
   , primaryKey
   , foreignKey
+  , optimisticLockColumn
   , describeCol
   , TableCatalogDef (..)
   , ColumnCatalogDef (..)
