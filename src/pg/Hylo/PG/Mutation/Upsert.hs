@@ -195,7 +195,7 @@ data UpsertAction (table :: Ctx -> Type) = UpsertAction
   }
 
 instance NFData (UpsertAction table) where
-  rnf (UpsertAction (TableSchema tn _) vs tg ac) =
+  rnf (UpsertAction (TableSchema tn _ _) vs tg ac) =
     rnf tn `seq` rnf vs `seq` rnf tg `seq` rnf ac
 
 instance Projectable (UpsertAction table) where

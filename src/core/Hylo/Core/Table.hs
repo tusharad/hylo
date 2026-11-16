@@ -21,6 +21,8 @@ module Hylo.Core.Table
     TableSchema (..)
   , tableSchema
   , Table (..)
+  , RedisCachePolicy (..)
+  , withRedisCache
 
     -- * Column Specification Combinators
   , colSpecExpr
@@ -42,6 +44,7 @@ module Hylo.Core.Table
   , diffField
   ) where
 
+import Control.DeepSeq (NFData)
 import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
@@ -84,6 +87,8 @@ class Table (table :: Ctx -> Type) where
   dirtyFieldsTable _ = Map.empty
   tableOptimisticLock :: table 'Result -> Maybe (Text, Int64)
   tableOptimisticLock _ = Nothing
+  tablePrimaryKey :: table 'Result -> Maybe Text
+  tablePrimaryKey _ = Nothing
 
 -- | Erase the phantom type parameter of a column definition to '()'.
 eraseColDef :: ColDef a -> ColDef ()
@@ -135,15 +140,30 @@ instance (ToFieldValue a) => ToFieldValue (Id table a) where
 colSpecExpr :: Text -> ColDef a -> QExpr a
 colSpecExpr alias spec = colExpr alias (colName spec)
 
+-- | Cache policy metadata for Redis read-through caching and onCommit invalidation.
+data RedisCachePolicy = RedisCachePolicy
+  { rcpKeyPrefix :: !Text
+  , rcpTtlSeconds :: !Int
+  }
+  deriving (Eq, Show, Generic)
+
+instance NFData RedisCachePolicy
+
 -- | Schema definition for an HKD table pairing the table name with its 'Meta record.
 data TableSchema (table :: Ctx -> Type) = TableSchema
   { tableName :: !Text
   , tableMeta :: !(table 'Meta)
+  , tableCachePolicy :: !(Maybe RedisCachePolicy)
   }
+  deriving (Generic)
 
--- | Construct a 'TableSchema' given a table name and its 'Meta record.
+-- | Construct a 'TableSchema' given a table name and its 'Meta record with no cache policy.
 tableSchema :: Text -> table 'Meta -> TableSchema table
-tableSchema = TableSchema
+tableSchema name meta = TableSchema name meta Nothing
+
+-- | Attach a 'RedisCachePolicy' to a 'TableSchema'.
+withRedisCache :: RedisCachePolicy -> TableSchema table -> TableSchema table
+withRedisCache policy s = s {tableCachePolicy = Just policy}
 
 -- | Construct a standard non-nullable column descriptor.
 column :: Text -> LogicalType a -> ColDef a

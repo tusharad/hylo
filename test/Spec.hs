@@ -17,6 +17,7 @@ import qualified Hylo.Core.TypeErrorSpec as TypeErrorSpec
 import qualified Hylo.Migrate.DiffSpec as DiffSpec
 import qualified Hylo.Migrate.LinterSpec as LinterSpec
 import qualified Hylo.PG.AlgebraSpec as AlgebraSpec
+import qualified Hylo.PG.Cache.RedisSpec as RedisCacheSpec
 import qualified Hylo.PG.Compiler.AggregateSpec as AggregateSpec
 import qualified Hylo.PG.Compiler.CTESpec as CTESpec
 import qualified Hylo.PG.Compiler.JoinFlattenerSpec as JoinFlattenerSpec
@@ -66,4 +67,5 @@ main = hspec $ do
   BuilderSpec.spec
   ConnectionSpec.spec
   SelectableSpec.spec
+  RedisCacheSpec.spec
   RealPostgresSpec.spec

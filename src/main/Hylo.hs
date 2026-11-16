@@ -7,6 +7,8 @@ Maintainer  : tusharadhatrao@gmail.com
 -}
 module Hylo
   ( module Hylo.Core
+  , module Hylo.Redis
   ) where
 
 import Hylo.Core
+import Hylo.Redis

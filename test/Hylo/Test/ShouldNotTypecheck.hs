@@ -39,8 +39,8 @@ instance NFData TxError
 instance NFData TxOp
 
 instance NFData TxState where
-  rnf (TxState s ops store a ch rh cs) =
-    rnf (s, ops, store, a, length ch, length rh, length cs)
+  rnf (TxState s ops store a ch rh cs ce) =
+    rnf (s, ops, store, a, length ch, length rh, length cs, length ce)
 
 instance NFData a => NFData (Tx db mode a) where
   rnf (TxReturn a) = rnf a

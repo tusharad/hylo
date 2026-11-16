@@ -83,6 +83,8 @@ module Hylo.Core
   , runTxPure
   , onCommit
   , onRollback
+  , setTxExtension
+  , getTxExtension
   , registerCursorData
   , getCursorData
   , takeCursorRows
@@ -145,6 +147,9 @@ module Hylo.Core
   , TableSchema (..)
   , tableSchema
   , Table (..)
+  , RedisCachePolicy (..)
+  , withRedisCache
+  , ToFieldValue (..)
   , PatchVal (..)
   , patchEntry
   , eraseColDef
