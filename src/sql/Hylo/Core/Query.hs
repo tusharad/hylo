@@ -73,6 +73,7 @@ module Hylo.Core.Query
 
     -- * Parameterized Mutation SQL Generation
   , findPrimaryKeyCol
+  , findOptimisticLockCol
   , renderInsertChangesetSQL
   , renderUpdateChangesetSQL
 
@@ -95,6 +96,7 @@ module Hylo.Core.Query
 where
 
 import Data.Int (Int64)
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Sequence (Seq)
 import Data.Text (Text)
@@ -179,6 +181,13 @@ findPrimaryKeyCol schema =
     (pk : _) -> pk
     [] -> "id"
 
+-- | Discover the optimistic lock column name for a schema, if any.
+findOptimisticLockCol :: (Table table) => TableSchema table -> Maybe Text
+findOptimisticLockCol schema =
+  case [colName c | c <- tableColDefs (tableMeta schema), colIsOptimisticLock c] of
+    (c : _) -> Just c
+    [] -> Nothing
+
 {- | Render a parameterized UPDATE SQL statement setting only modified fields.
 
 Omits 'Unchanged' fields entirely. Binds parameters for 'SetTo' values and emits
@@ -194,9 +203,19 @@ renderUpdateChangesetSQL ::
 renderUpdateChangesetSQL schema cs =
   let tbl = quoteIdentifier PostgresDialect (tableName schema)
       pkCol = findPrimaryKeyCol schema
+      optLockInfo = case changesetOptimisticLock cs of
+        Just (c, v) ->
+          let cName = if c /= "" then c else fromMaybe "version" (findOptimisticLockCol schema)
+           in Just (cName, v)
+        Nothing -> Nothing
       entries = patchEntries (tableMeta schema) (changesetPatch cs)
-      -- Exclude primary key from SET clause (it belongs in WHERE clause)
-      setEntries = filter (\(c, _) -> colName c /= pkCol) entries
+      -- Exclude primary key and optimistic lock version column from SET clause
+      setEntries =
+        filter
+          ( \(c, _) ->
+              colName c /= pkCol && Just (colName c) /= fmap fst optLockInfo
+          )
+          entries
       pkVal =
         if changesetKey cs /= "" && changesetKey cs /= tableName schema
           then changesetKey cs
@@ -219,11 +238,26 @@ renderUpdateChangesetSQL schema cs =
                     (restClauses, restParams, finalIdx) = buildSetClauses rest idx
                  in (clause : restClauses, restParams, finalIdx)
 
-      (setClauses, setParams, nextIdx) = buildSetClauses setEntries 1
+      (initialSetClauses, setParams, nextIdx) = buildSetClauses setEntries 1
+      setClauses = case optLockInfo of
+        Just (verCol, _) ->
+          let qVerCol = quoteIdentifier PostgresDialect verCol
+           in initialSetClauses ++ [qVerCol <> " = " <> qVerCol <> " + 1"]
+        Nothing -> initialSetClauses
+
       qPkCol = quoteIdentifier PostgresDialect pkCol
-      whereClause = " WHERE " <> qPkCol <> " = $" <> T.pack (show nextIdx)
+      baseWhere = qPkCol <> " = $" <> T.pack (show nextIdx)
       pkParam = BoundParam nextIdx pkVal "integer"
-      allParams = setParams ++ [pkParam]
+
+      (whereClause, allParams) = case optLockInfo of
+        Just (verCol, expectedVer) ->
+          let qVerCol = quoteIdentifier PostgresDialect verCol
+              verIdx = nextIdx + 1
+              verWhere = qVerCol <> " = $" <> T.pack (show verIdx)
+              verParam = BoundParam verIdx (toFieldValue expectedVer) "bigint"
+           in (" WHERE " <> baseWhere <> " AND " <> verWhere, setParams ++ [pkParam, verParam])
+        Nothing ->
+          (" WHERE " <> baseWhere, setParams ++ [pkParam])
 
       sql = case setClauses of
         [] ->

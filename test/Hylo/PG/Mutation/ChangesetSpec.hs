@@ -24,6 +24,7 @@ Maintainer  : tusharadhatrao@gmail.com
 module Hylo.PG.Mutation.ChangesetSpec (spec) where
 
 import Data.Foldable (toList)
+import Data.Function ((&))
 import Data.Int (Int64)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
@@ -31,7 +32,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Hylo.Core
-import Hylo.Core.Query (PGVersion (..), Postgres)
+import Hylo.Core.Query (PGVersion (..), Postgres, findOptimisticLockCol)
 import Hylo.PG
 import Hylo.Test.ShouldNotTypecheck (shouldNotTypecheckWith)
 import Test.Hspec
@@ -170,6 +171,74 @@ aliceRecord =
     , score = 100
     , active = True
     }
+
+--------------------------------------------------------------------------------
+-- Versioned Document HKD Entity for Optimistic Locking Tests
+--------------------------------------------------------------------------------
+
+data VersionedDocT (ctx :: Ctx) = VersionedDoc
+  { docId :: !(Col ctx (Id VersionedDocT Int64))
+  , title :: !(Col ctx Text)
+  , version :: !(Col ctx Int64)
+  }
+  deriving (Generic)
+
+deriving instance Eq (VersionedDocT 'Result)
+deriving instance Show (VersionedDocT 'Result)
+deriving instance Eq (VersionedDocT 'Patch)
+deriving instance Show (VersionedDocT 'Patch)
+
+type VersionedDoc = VersionedDocT 'Result
+
+versionedDocSchema :: TableSchema VersionedDocT
+versionedDocSchema =
+  tableSchema "documents" $
+    VersionedDoc
+      { docId = primaryKey "id" "bigint"
+      , title = column "title" "text"
+      , version = optimisticLockColumn "version" "bigint"
+      }
+
+instance Table VersionedDocT where
+  toTableExpr alias meta =
+    VersionedDoc
+      { docId = colSpecExpr alias meta.docId
+      , title = colSpecExpr alias meta.title
+      , version = colSpecExpr alias meta.version
+      }
+  diffTable old new =
+    VersionedDoc
+      { docId = diffField old.docId new.docId
+      , title = diffField old.title new.title
+      , version = diffField old.version new.version
+      }
+  tableColDefs m =
+    [ eraseColDef m.docId
+    , eraseColDef m.title
+    , eraseColDef m.version
+    ]
+  patchEntries meta patch =
+    concat
+      [ patchEntry meta.docId patch.docId
+      , patchEntry meta.title patch.title
+      , patchEntry meta.version patch.version
+      ]
+  dirtyFieldsTable patch =
+    Map.fromList
+      [ (colName c, case v of ValSetTo t -> t; ValSetDefault -> "DEFAULT")
+      | (c, v) <- patchEntries (tableMeta versionedDocSchema) patch
+      ]
+  tableOptimisticLock old = Just ("version", old.version)
+
+versionedDocCodec :: Codec VersionedDoc VersionedDoc
+versionedDocCodec =
+  VersionedDoc
+    <$> field (.docId) (idCodec int64Codec)
+    <*> field (.title) textCodec
+    <*> field (.version) int64Codec
+
+instance TableCodec VersionedDocT where
+  tableCodec = versionedDocCodec
 
 --------------------------------------------------------------------------------
 -- Test Specs
@@ -494,3 +563,125 @@ spec = describe "User Story 5: Wire Changeset into hylo-pg Binary Execution & Er
             (updateSql, updateParams) = renderUpdateChangesetSQL customUserSchema csUpdate
         updateSql `shouldBe` "UPDATE \"users\" SET \"email\" = $1 WHERE \"id\" = $2 RETURNING *"
         updateParams `shouldBe` [BoundParam 1 "alice@example.com" "text", BoundParam 2 "1" "integer"]
+
+  describe "9. User Story 2: First-Class Optimistic Locking (E009)" $ do
+    it "marks optimisticLockColumn with colIsOptimisticLock = True" $ do
+      let cols = tableColDefs (tableMeta versionedDocSchema)
+      [colName c | c <- cols, colIsOptimisticLock c] `shouldBe` ["version"]
+      [colName c | c <- cols, not (colIsOptimisticLock c)] `shouldBe` ["id", "title"]
+
+    it "findOptimisticLockCol finds version column from schema metadata" $ do
+      findOptimisticLockCol versionedDocSchema `shouldBe` Just "version"
+      findOptimisticLockCol customUserSchema `shouldBe` Nothing
+
+    it "renderUpdateChangesetSQL emits \"version\" = \"version\" + 1 and AND \"version\" = $expected" $ do
+      let cs =
+            change @'UpdateOp
+              ( VersionedDoc
+                  { docId = SetTo (toId 10)
+                  , title = SetTo "Concurrency In Depth"
+                  , version = Unchanged
+                  }
+              )
+              & optimisticLock "version" 1
+          (sql, params) = renderUpdateChangesetSQL versionedDocSchema cs
+      sql
+        `shouldBe` "UPDATE \"documents\" SET \"title\" = $1, \"version\" = \"version\" + 1 WHERE \"id\" = $2 AND \"version\" = $3 RETURNING *"
+      params
+        `shouldBe` [ BoundParam 1 "Concurrency In Depth" "text"
+                   , BoundParam 2 "10" "integer"
+                   , BoundParam 3 "1" "bigint"
+                   ]
+
+    it "renderUpdateChangesetSQL emits \"version\" = \"version\" + 1 when no other fields are modified" $ do
+      let cs =
+            change @'UpdateOp
+              ( VersionedDoc
+                  { docId = SetTo (toId 5)
+                  , title = Unchanged
+                  , version = Unchanged
+                  }
+              )
+              & optimisticLock "version" 3
+          (sql, params) = renderUpdateChangesetSQL versionedDocSchema cs
+      sql
+        `shouldBe` "UPDATE \"documents\" SET \"version\" = \"version\" + 1 WHERE \"id\" = $1 AND \"version\" = $2 RETURNING *"
+      params
+        `shouldBe` [ BoundParam 1 "5" "integer"
+                   , BoundParam 2 "3" "bigint"
+                   ]
+
+    it "renderUpdateChangesetSQL infers column name via optimisticLockVersion" $ do
+      let cs =
+            change @'UpdateOp
+              ( VersionedDoc
+                  { docId = SetTo (toId 20)
+                  , title = SetTo "Auto-Inferred"
+                  , version = Unchanged
+                  }
+              )
+              & optimisticLockVersion 9
+          (sql, params) = renderUpdateChangesetSQL versionedDocSchema cs
+      sql
+        `shouldBe` "UPDATE \"documents\" SET \"title\" = $1, \"version\" = \"version\" + 1 WHERE \"id\" = $2 AND \"version\" = $3 RETURNING *"
+      params
+        `shouldBe` [ BoundParam 1 "Auto-Inferred" "text"
+                   , BoundParam 2 "20" "integer"
+                   , BoundParam 3 "9" "bigint"
+                   ]
+
+    it "diffRecord automatically populates changesetOptimisticLock via tableOptimisticLock" $ do
+      let oldDoc = VersionedDoc (toId 1) "Initial" 4
+          newDoc = oldDoc {title = "Modified"}
+          cs = diffRecord versionedDocSchema oldDoc newDoc
+      changesetOptimisticLock cs `shouldBe` Just ("version", 4)
+      let (sql, params) = renderUpdateChangesetSQL versionedDocSchema cs
+      sql
+        `shouldBe` "UPDATE \"documents\" SET \"title\" = $1, \"version\" = \"version\" + 1 WHERE \"id\" = $2 AND \"version\" = $3 RETURNING *"
+      params
+        `shouldBe` [ BoundParam 1 "Modified" "text"
+                   , BoundParam 2 "1" "integer"
+                   , BoundParam 3 "4" "bigint"
+                   ]
+
+    it "updateChangesetWithFallback rejects stale version with stale_object error" $ do
+      let doc1 = VersionedDoc (toId 1) "Initial" 1
+          csStale =
+            change @'UpdateOp (VersionedDoc (SetTo (toId 1)) (SetTo "Conflict") Unchanged)
+              & optimisticLock "version" 1
+              & withUniqueKey "sim_stale"
+          tx =
+            updateChangesetWithFallback versionedDocSchema doc1 csStale ::
+              Tx (Postgres 'PG16) 'ReadWrite (Either ChangesetError VersionedDoc)
+          res = runTxPure tx
+      case res of
+        Right (Left err) ->
+          changesetErrorFields err
+            `shouldBe` (FieldError "version" "stale_object" "Record was modified by another transaction" :| [])
+        _ -> expectationFailure ("Expected Left stale_object, got: " ++ show res)
+
+    it "updateChangesetWithFallback detects successive modification conflict on identical entity" $ do
+      let doc2 = VersionedDoc (toId 1) "V2" 2
+          cs1 =
+            change @'UpdateOp (VersionedDoc (SetTo (toId 1)) (SetTo "V2") Unchanged)
+              & optimisticLock "version" 1
+              & withUniqueKey "doc_1"
+          cs2 =
+            change @'UpdateOp (VersionedDoc (SetTo (toId 1)) (SetTo "V2_Conflict") Unchanged)
+              & optimisticLock "version" 1
+              & withUniqueKey "doc_1"
+          txCompound ::
+            Tx
+              (Postgres 'PG16)
+              'ReadWrite
+              (Either ChangesetError VersionedDoc, Either ChangesetError VersionedDoc)
+          txCompound = do
+            res1 <- updateChangesetWithFallback versionedDocSchema doc2 cs1
+            res2 <- updateChangesetWithFallback versionedDocSchema doc2 cs2
+            pure (res1, res2)
+          res = runTxPure txCompound
+      case res of
+        Right (Right _, Left err) ->
+          changesetErrorFields err
+            `shouldBe` (FieldError "version" "stale_object" "Record was modified by another transaction" :| [])
+        _ -> expectationFailure ("Expected first update success, second failure, got: " ++ show res)

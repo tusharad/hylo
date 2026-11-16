@@ -152,6 +152,7 @@ data ColDef a = ColDef
   , colLogicalType :: !(LogicalType a)
   , colIsNullable :: !Bool
   , colIsPrimaryKey :: !Bool
+  , colIsOptimisticLock :: !Bool
   , colDescription :: !(Maybe Text)
   , colSqlType :: !Text
   }

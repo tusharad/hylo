@@ -428,3 +428,26 @@ spec = describe "User Story 3: Pure Hylo.Core.Changeset Engine" $ do
         let emptyCs = emptyChangeset (diffTable sampleAccount1 sampleAccount1)
             csWithErrors = foldr (\i acc -> addError (T.pack ("field_" <> show i)) "code" "error" acc) emptyCs [1 .. n]
          in length (changesetErrors csWithErrors) == n && not (changesetValid csWithErrors)
+
+  describe "User Story 2: First-Class Optimistic Locking in Changeset" $ do
+    it "optimisticLock attaches column name and expected version" $ do
+      let emptyCs = emptyChangeset (diffTable sampleAccount1 sampleAccount1)
+          lockedCs = optimisticLock "version" 1 emptyCs
+      changesetOptimisticLock lockedCs `shouldBe` Just ("version", 1)
+
+    it "withOptimisticLock is equivalent to optimisticLock" $ do
+      let emptyCs = emptyChangeset (diffTable sampleAccount1 sampleAccount1)
+          lockedCs = withOptimisticLock "version" 42 emptyCs
+      changesetOptimisticLock lockedCs `shouldBe` Just ("version", 42)
+
+    it "optimisticLockVersion sets empty column name for schema deduction" $ do
+      let emptyCs = emptyChangeset (diffTable sampleAccount1 sampleAccount1)
+          lockedCs = optimisticLockVersion 7 emptyCs
+      changesetOptimisticLock lockedCs `shouldBe` Just ("", 7)
+
+    it "castChangesetOp preserves optimistic lock version" $ do
+      let csInsert =
+            optimisticLock "version" 3 (emptyChangeset (diffTable sampleAccount1 sampleAccount1)) ::
+              Changeset AccountProfileT 'InsertOp
+          csUpdate = castChangesetOp csInsert :: Changeset AccountProfileT 'UpdateOp
+      changesetOptimisticLock csUpdate `shouldBe` Just ("version", 3)
