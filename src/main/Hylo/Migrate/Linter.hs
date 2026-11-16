@@ -58,6 +58,7 @@ data LintError
   | MissingStatementTimeout
   | UnsafeMaintenanceCommand !Text
   | LockTimeoutTooHigh !Int
+  | UnsafeEnumLabelRemoved !Text !Text ![Text]
   deriving (Eq, Show, Generic, NFData)
 
 -- | Configurable thresholds and safety flags for migration linting.

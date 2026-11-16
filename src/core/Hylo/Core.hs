@@ -28,6 +28,7 @@ module Hylo.Core
   , just
   , isNull
   , coalesce
+  , enumLit
   , (==.)
   , (/=.)
   , (<.)
@@ -66,6 +67,10 @@ module Hylo.Core
   , CheckPaginationValid
   , AssertSafeMigration (..)
   , CheckSafeMigration
+  , AssertEnumLabel (..)
+  , CheckEnumLabel
+  , HasEnumLabels (..)
+  , LabelIn
 
     -- * Transactions & Failure
   , TxMode (..)
@@ -161,6 +166,8 @@ module Hylo.Core
   , primaryKey
   , foreignKey
   , optimisticLockColumn
+  , enumCol
+  , sumTypeCol
   , describeCol
   , TableCatalogDef (..)
   , ColumnCatalogDef (..)
@@ -170,6 +177,7 @@ module Hylo.Core
     -- * Zero-Generics Codec Engine
   , Codec (..)
   , ValueCodec
+  , HyloCodec
   , RowCodec
   , Decoder (..)
   , runBinaryEncoder
@@ -184,6 +192,11 @@ module Hylo.Core
   , pairCodec
   , tripleCodec
   , quadCodec
+  , enumCodec
+  , boundedEnumCodec
+  , boundedEnumLabels
+  , camelToSnake
+  , enumColDef
   ) where
 
 import Hylo.Core.Changeset

@@ -2,11 +2,11 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoFieldSelectors #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# OPTIONS_GHC -fdefer-type-errors -Wno-deferred-type-errors #-}
@@ -38,7 +38,7 @@ import Hylo.Core.Context
   , colName
   , colSqlType
   )
-import Hylo.Core.Expr (QExpr (..), just, (==.))
+import Hylo.Core.Expr (QExpr (..), colExpr, enumLit, just, lit, (==.))
 import Hylo.Core.Key (Id (..), toId)
 import Hylo.Core.Query
   ( Changeset (..)
@@ -62,6 +62,7 @@ import Hylo.Core.Table
 import Hylo.Core.TypeError
   ( AssertAcyclic (..)
   , AssertBackendCapability (..)
+  , AssertEnumLabel (..)
   , AssertGrouped (..)
   , AssertHasPrimaryKey (..)
   , AssertHasVersion (..)
@@ -72,6 +73,7 @@ import Hylo.Core.TypeError
   , AssertParameterized (..)
   , AssertSafeMigration (..)
   , AssertValidForeignKey (..)
+  , HasEnumLabels (..)
   , PGVersion (..)
   )
 import Hylo.SQL.AST (renderExpr)
@@ -274,3 +276,53 @@ spec = describe "Epic 3: Closed Type Family Diagnostics" $ do
 
     it "permits valid PostgreSQL version requirement" $
       pgMinVersionDict (Proxy @'PG18) (Proxy @'PG18) (Proxy @"server-side uuidv7()") `shouldBe` ()
+
+  describe "User Story 19: Enum Label Diagnostics (E017)" $ do
+    it "triggers [Hylo Error E017] on unregistered enum labels" $
+      shouldNotTypecheckWith
+        "[Hylo Error E017]"
+        ( enumLabelDict
+            (Proxy @"status")
+            (Proxy @"paused")
+            (Proxy @'["pending", "shipped", "delivered"])
+            (Proxy @'False)
+        )
+
+    it "permits registered enum labels" $
+      enumLabelDict
+        (Proxy @"status")
+        (Proxy @"pending")
+        (Proxy @'["pending", "shipped", "delivered"])
+        (Proxy @'True)
+        `shouldBe` ()
+
+    it "renders registered enum label literals for enum columns" $ do
+      let q = enumLit @"pending" (Proxy @"status") :: QExpr OrderStatus
+      q `shouldBe` LitExpr "pending"
+
+    it "permits comparing enum columns to constructor literals" $ do
+      let statusCol = colExpr "orders" "status" :: QExpr OrderStatus
+          cmp = statusCol ==. lit Pending
+      cmp `shouldBe` BinOpExpr "=" statusCol (LitExpr "Pending")
+
+    it "triggers [Hylo Error E017] when comparing an enum column to an unregistered label" $
+      shouldNotTypecheckWith
+        "[Hylo Error E017]"
+        ( let statusCol = colExpr "orders" "status" :: QExpr OrderStatus
+              pausedLit = enumLit @"paused" (Proxy @"status") :: QExpr OrderStatus
+           in statusCol ==. pausedLit
+        )
+
+    it "triggers [Hylo Error E003] (not a GHC internal error) on wrong-type enum literals" $
+      shouldNotTypecheckWith
+        "[Hylo Error E003]"
+        ( let statusCol = colExpr "orders" "status" :: QExpr OrderStatus
+           in statusCol ==. lit (42 :: Int64)
+        )
+
+-- | User Story 19 fixture: bounded enum ADT with type-level registered labels.
+data OrderStatus = Pending | Shipped | Delivered
+  deriving (Eq, Show, Bounded, Enum)
+
+instance HasEnumLabels OrderStatus where
+  type EnumLabelsOf OrderStatus = '["pending", "shipped", "delivered"]

@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -41,6 +42,7 @@ import Hylo.Migrate.Catalog
 import Hylo.Migrate.Catalog.PG
 import Hylo.Migrate.CodeGen
 import Hylo.Migrate.Diff
+import Hylo.Migrate.Linter (LintError (..))
 import Test.Hspec
 import Test.QuickCheck
 
@@ -488,3 +490,110 @@ spec = describe "Epic 18: Live Catalog Introspection & DDL Synthesis" $ do
           haskellCat = schemasToCatalog [tableSchemaToDef accountSchema]
           diff = computeCatalogDiff dbCat haskellCat
       diff `shouldBe` emptyCatalogDiff
+
+  describe "User Story 19: Native PostgreSQL ENUM DDL Synthesis" $ do
+    let ordersTable = ordersEnumTableDef orderStatusEnumLabels
+
+    it "emits CREATE TYPE before CREATE TABLE for tables with enum columns" $ do
+      let (upStmts, _) =
+            diffToStatements (computeCatalogDiff emptyCatalog (schemasToCatalog [ordersTable]))
+      case upStmts of
+        [CreateEnumTypeStmt "status" ls, CreateTableStmt _] -> ls `shouldBe` orderStatusEnumLabels
+        other -> expectationFailure ("Unexpected statement sequence: " <> show other)
+
+    it "renders CREATE TYPE with quoted labels preceding the CREATE TABLE statement" $ do
+      let (upStmts, _) =
+            diffToStatements (computeCatalogDiff emptyCatalog (schemasToCatalog [ordersTable]))
+          upSql = T.intercalate "\n" (map renderDDLStatement upStmts)
+      T.unpack upSql `shouldContain` "CREATE TYPE \"status\" AS ENUM ('pending', 'shipped', 'delivered');"
+      case T.breakOn "CREATE TABLE" upSql of
+        (beforeTable, _) ->
+          "CREATE TYPE \"status\"" `T.isInfixOf` beforeTable
+            `shouldBe` True
+
+    it "renders enum columns using the enum type name" $
+      case tblColumns ordersTable of
+        (_ : statusCol : _) -> renderColumnDef statusCol `shouldBe` "\"status\" \"status\" NOT NULL"
+        other -> expectationFailure ("Unexpected column list: " <> show other)
+
+    it "emits ALTER TYPE ADD VALUE for enum label additions" $ do
+      let src = schemasToCatalog [ordersEnumTableDef ["pending", "shipped"]]
+          tgt = schemasToCatalog [ordersEnumTableDef ["pending", "shipped", "delivered"]]
+          (upStmts, _) = diffToStatements (computeCatalogDiff src tgt)
+      AlterEnumTypeAddValueStmt "status" "delivered" `elem` upStmts `shouldBe` True
+      any
+        ( \case
+            AlterColumnTypeStmt _ (ColumnName "status") _ _ -> True
+            _ -> False
+        )
+        upStmts
+        `shouldBe` False
+      T.unpack (T.intercalate "\n" (map renderDDLStatement upStmts))
+        `shouldContain` "ALTER TYPE \"status\" ADD VALUE 'delivered';"
+
+    it "flags enum label removals as linter hazards without emitting DDL" $ do
+      let src = schemasToCatalog [ordersEnumTableDef ["pending", "shipped", "delivered"]]
+          tgt = schemasToCatalog [ordersEnumTableDef ["pending", "shipped"]]
+          diff = computeCatalogDiff src tgt
+          (upStmts, _) = diffToStatements diff
+      diffEnumLabelHazards diff `shouldBe` [UnsafeEnumLabelRemoved "orders" "status" ["delivered"]]
+      upStmts `shouldBe` []
+
+    it "preserves the in-memory reversal law with enum label evolution" $ do
+      let s1 = schemasToCatalog [ordersEnumTableDef ["pending", "shipped"]]
+          s2 = schemasToCatalog [ordersEnumTableDef ["pending", "shipped", "delivered"]]
+      applyDiff (computeCatalogDiff s1 s2) s1 `shouldBe` s2
+      applyDiff (invertDiff (computeCatalogDiff s1 s2)) s2 `shouldBe` s1
+
+    it "drops enum types after the table in down statements" $ do
+      let (_, downStmts) = diffToStatements (computeCatalogDiff emptyCatalog (schemasToCatalog [ordersTable]))
+      case downStmts of
+        [DropTableStmt (TableName "orders") True, DropEnumTypeStmt "status" False] -> pure ()
+        other -> expectationFailure ("Unexpected down statement sequence: " <> show other)
+
+    it "recreates enum types before tables when reverting dropped tables" $ do
+      let (_, downStmts) =
+            diffToStatements (computeCatalogDiff (schemasToCatalog [ordersTable]) emptyCatalog)
+      case downStmts of
+        [CreateEnumTypeStmt "status" _, CreateTableStmt _] -> pure ()
+        other -> expectationFailure ("Unexpected down statement sequence: " <> show other)
+
+    it "populates catalogEnums from enum columns during catalog construction" $ do
+      let cat = schemasToCatalog [ordersTable]
+      Map.lookup "status" cat.catalogEnums `shouldBe` Just orderStatusEnumLabels
+
+-- -----------------------------------------------------------------------------
+-- User Story 19 Fixtures
+-- -----------------------------------------------------------------------------
+
+-- | All registered labels of the fixture enum type.
+orderStatusEnumLabels :: [Text]
+orderStatusEnumLabels = ["pending", "shipped", "delivered"]
+
+-- | User Story 19 fixture: orders table with a native ENUM status column.
+ordersEnumTableDef :: [Text] -> TableDef
+ordersEnumTableDef enumLabels =
+  TableDef
+    { tblName = TableName "orders"
+    , tblColumns =
+        [ ColumnDef
+            { colName = ColumnName "id"
+            , colType = TypeBigInt
+            , colNullability = NotNull
+            , colDefault = Nothing
+            , colIsPrimaryKey = True
+            , colComment = Nothing
+            }
+        , ColumnDef
+            { colName = ColumnName "status"
+            , colType = EnumType "status" enumLabels
+            , colNullability = NotNull
+            , colDefault = Nothing
+            , colIsPrimaryKey = False
+            , colComment = Nothing
+            }
+        ]
+    , tblIndexes = []
+    , tblConstraints = [PrimaryKeyConstraint (ConstraintName "orders_pkey") [ColumnName "id"]]
+    , tblComment = Nothing
+    }

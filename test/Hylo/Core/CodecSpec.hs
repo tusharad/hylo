@@ -23,6 +23,7 @@ module Hylo.Core.CodecSpec
   ( spec
   ) where
 
+import Control.Exception (evaluate)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -251,6 +252,80 @@ spec = describe "Epic 2: Zero-Generics Linear-Time Codec Engine" $ do
       let enc = runBinaryEncoder (arrayCodec int64Codec) []
           dec = runBinaryDecoder (arrayCodec int64Codec) enc
        in dec `shouldBe` Right []
+
+  describe "User Story 19: Custom ADT / PostgreSQL ENUM Column Codecs" $ do
+    it "Law 1: enumCodec round-trips every registered OrderStatus constructor" $
+      forAll (elements [minBound .. maxBound] :: Gen OrderStatus) $ \s ->
+        runBinaryDecoder orderStatusCodec (runBinaryEncoder orderStatusCodec s) == Right s
+
+    it "enumCodec encodes each constructor to its registered framed UTF-8 label" $ do
+      runBinaryEncoder orderStatusCodec Pending `shouldBe` runBinaryEncoder textCodec "pending"
+      runBinaryEncoder orderStatusCodec Shipped `shouldBe` runBinaryEncoder textCodec "shipped"
+      runBinaryEncoder orderStatusCodec Delivered `shouldBe` runBinaryEncoder textCodec "delivered"
+
+    it "enumCodec decodes framed text labels back to constructors" $ do
+      runBinaryDecoder orderStatusCodec (runBinaryEncoder textCodec "pending") `shouldBe` Right Pending
+      runBinaryDecoder orderStatusCodec (runBinaryEncoder textCodec "shipped") `shouldBe` Right Shipped
+      runBinaryDecoder orderStatusCodec (runBinaryEncoder textCodec "delivered")
+        `shouldBe` Right Delivered
+
+    it "enumCodec fails descriptively on unknown labels" $
+      case runBinaryDecoder orderStatusCodec (runBinaryEncoder textCodec "paused") of
+        Left err -> do
+          T.unpack err `shouldContain` "Unknown enum label"
+          T.unpack err `shouldContain` "paused"
+        Right v -> expectationFailure ("Expected decode failure, got: " <> show v)
+
+    it "enumCodec raises a descriptive error when encoding an unregistered constructor" $
+      evaluate (runBinaryEncoder (enumCodec [] :: HyloCodec OrderStatus) Pending)
+        `shouldThrow` anyException
+
+    it "boundedEnumCodec derives snake_case labels from constructors" $ do
+      runBinaryEncoder boundedOrderStatusCodec Pending `shouldBe` runBinaryEncoder textCodec "pending"
+      runBinaryEncoder boundedOrderStateCodec AwaitingPickup
+        `shouldBe` runBinaryEncoder textCodec "awaiting_pickup"
+
+    it "boundedEnumCodec is equivalent to enumCodec over the derived label table" $
+      forAll (elements [minBound .. maxBound] :: Gen OrderStatus) $ \s ->
+        runBinaryEncoder boundedOrderStatusCodec s == runBinaryEncoder orderStatusCodec s
+
+    it "boundedEnumCodec round-trips every constructor of a multi-word sum type" $
+      forAll (elements [minBound .. maxBound] :: Gen OrderState) $ \s ->
+        runBinaryDecoder boundedOrderStateCodec (runBinaryEncoder boundedOrderStateCodec s) == Right s
+
+    it "pgEnumCodec registers round-trips through the text-protocol OID fallback" $ do
+      runBinaryDecoder (pgEnumCodec orderStatusPairs) (runBinaryEncoder textCodec "delivered")
+        `shouldBe` Right Delivered
+      runBinaryEncoder (pgEnumCodec orderStatusPairs) Delivered
+        `shouldBe` runBinaryEncoder textCodec "delivered"
+
+-- -----------------------------------------------------------------------------
+-- User Story 19 QuickCheck Fixtures
+-- -----------------------------------------------------------------------------
+
+-- | User Story 19 fixture: a sum type mapping to a PostgreSQL ENUM column.
+data OrderStatus = Pending | Shipped | Delivered
+  deriving (Eq, Show, Bounded, Enum)
+
+-- | User Story 19 fixture: multi-word constructor names for snake_case derivation.
+data OrderState = AwaitingPickup | InTransit | DeliveredSafe
+  deriving (Eq, Show, Bounded, Enum)
+
+-- | Registered (label, constructor) pairs for 'OrderStatus'.
+orderStatusPairs :: [(Text, OrderStatus)]
+orderStatusPairs = [("pending", Pending), ("shipped", Shipped), ("delivered", Delivered)]
+
+-- | Explicit lookup-table codec for 'OrderStatus'.
+orderStatusCodec :: HyloCodec OrderStatus
+orderStatusCodec = enumCodec orderStatusPairs
+
+-- | Derived codec for 'OrderStatus' via 'boundedEnumCodec'.
+boundedOrderStatusCodec :: HyloCodec OrderStatus
+boundedOrderStatusCodec = boundedEnumCodec
+
+-- | Derived codec for the multi-word 'OrderState' fixture.
+boundedOrderStateCodec :: HyloCodec OrderState
+boundedOrderStateCodec = boundedEnumCodec
 
 -- -----------------------------------------------------------------------------
 -- User Story 12 QuickCheck Generators

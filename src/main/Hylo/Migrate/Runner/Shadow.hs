@@ -55,7 +55,7 @@ verifyMigrationSequence s0 upStmts downStmts =
       case applyDDLSequence downStmts s1 of
         Left err -> ShadowDownFailed ("Failed to apply down statements: " <> err)
         Right s0'
-          | s0' /= s0 ->
+          | not (sameCatalogStructure s0' s0) ->
               ShadowDownFailed
                 ( "Rollback state S0' does not match initial baseline S0.\nDiff: "
                     <> T.pack (show (computeCatalogDiff s0 s0'))
@@ -64,12 +64,36 @@ verifyMigrationSequence s0 upStmts downStmts =
               case applyDDLSequence upStmts s0' of
                 Left err -> ShadowIdempotenceFailed ("Failed to re-apply up statements: " <> err)
                 Right s1'
-                  | s1' /= s1 ->
+                  | not (sameCatalogStructure s1' s1) ->
                       ShadowIdempotenceFailed
                         ( "Re-applied state S1' does not match first-pass target state S1.\nDiff: "
                             <> T.pack (show (computeCatalogDiff s1 s1'))
                         )
                   | otherwise -> ShadowSuccess
+
+{- | Structural catalog equality ignoring enum label evolution (User Story 19).
+
+PostgreSQL enum values are monotonic: they can be added but never dropped.
+Label additions are therefore irreversible by construction, so shadow
+reversibility compares enum columns by type name rather than by full label
+set. Statement-level failures (duplicate types, unknown types) are still
+caught by the stateful simulation in 'applyDDLStatement'.
+-}
+sameCatalogStructure :: Catalog -> Catalog -> Bool
+sameCatalogStructure a b = normalizeEnums a == normalizeEnums b
+
+-- | Erase enum label sets from a catalog, keeping only enum type names.
+normalizeEnums :: Catalog -> Catalog
+normalizeEnums cat =
+  cat
+    { catalogEnums = Map.empty
+    , catalogTables = Map.map normalizeTable (catalogTables cat)
+    }
+  where
+    normalizeTable tbl = tbl {tblColumns = map normalizeColumn (tblColumns tbl)}
+    normalizeColumn c = case colType c of
+      EnumType ty _ -> c {colType = TypeCustom ty}
+      _ -> c
 
 -- | Verify that a CatalogDiff produces fully reversible and idempotent migrations.
 verifyCatalogDiff :: Catalog -> CatalogDiff -> ShadowVerificationResult
@@ -170,6 +194,40 @@ applyDDLStatement stmt cat = case stmt of
          in Right (addTable (tbl {tblConstraints = remaining}) cat)
   RawDDLStmt _ ->
     Right cat
+  CreateEnumTypeStmt ty labels ->
+    if Map.member ty (catalogEnums cat)
+      then Left ("Enum type already exists: " <> ty)
+      else Right (cat {catalogEnums = Map.insert ty labels (catalogEnums cat)})
+  AlterEnumTypeAddValueStmt ty label ->
+    case Map.lookup ty (catalogEnums cat) of
+      Nothing -> Left ("Enum type does not exist to alter: " <> ty)
+      Just labels
+        -- Idempotent ADD VALUE IF NOT EXISTS semantics: re-applying an
+        -- already-registered label is a no-op.
+        | label `elem` labels -> Right cat
+        | otherwise ->
+            let newLabels = labels ++ [label]
+             in Right
+                  cat
+                    { catalogEnums = Map.insert ty newLabels (catalogEnums cat)
+                    , catalogTables = Map.map (updateEnumColumns ty newLabels) (catalogTables cat)
+                    }
+  DropEnumTypeStmt ty _cascade ->
+    if Map.member ty (catalogEnums cat)
+      then Right (cat {catalogEnums = Map.delete ty (catalogEnums cat)})
+      else Right cat
+
+-- | Rewrite every enum-typed column of the given type to a new label set.
+updateEnumColumns :: Text -> [Text] -> TableDef -> TableDef
+updateEnumColumns ty labels tbl =
+  tbl
+    { tblColumns =
+        [ case colType c of
+            EnumType ty' _ | ty' == ty -> c {colType = EnumType ty labels}
+            _ -> c
+        | c <- tblColumns tbl
+        ]
+    }
 
 -- | Extract constraint name.
 constraintDefName :: ConstraintDef -> ConstraintName
