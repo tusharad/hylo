@@ -7,6 +7,7 @@ Maintainer  : tusharadhatrao@gmail.com
 -}
 module Main (main) where
 
+import qualified Hylo.AI.Context.ExporterSpec as ExporterSpec
 import qualified Hylo.AI.QueryToolSpec as QueryToolSpec
 import qualified Hylo.Backend.CapabilitySpec as CapabilitySpec
 import qualified Hylo.Core.ChangesetSpec as ChangesetSpec
@@ -45,6 +46,7 @@ main :: IO ()
 main = hspec $ do
   ChangesetSpec.spec
   TableSpec.spec
+  ExporterSpec.spec
   TransactionSpec.spec
   CodecSpec.spec
   TypeErrorSpec.spec

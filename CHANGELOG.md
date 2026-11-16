@@ -8,4 +8,10 @@ and this project adheres to the
 
 ## Unreleased
 
+### Added
+
+- `Hylo.AI.Context.Exporter`: pure, deterministic `AGENTS.md` and `llms.txt` renderers over an `[AnyTableSchema]` registry (`exportAgentsMarkdown`, `exportLlmsTxt`) with deterministic token estimation and budget enforcement (`estimateTokens`, `fitTokenBudget`).
+- `hylo ai-context` CLI sub-command with `--dir`, `--tables`, and `--budget` flags writing `AGENTS.md` and `llms.txt` and printing a token summary.
+- `TableSchema` gains a backward-compatible `tableDescription :: Maybe Text` field (default `Nothing`) and the `withTableDescription` combinator.
+
 ## 0.1.0.0 - YYYY-MM-DD

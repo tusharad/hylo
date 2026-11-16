@@ -25,6 +25,7 @@ module Hylo.Core.Table
   , Table (..)
   , RedisCachePolicy (..)
   , withRedisCache
+  , withTableDescription
 
     -- * Column Specification Combinators
   , colSpecExpr
@@ -156,16 +157,23 @@ data TableSchema (table :: Ctx -> Type) = TableSchema
   { tableName :: !Text
   , tableMeta :: !(table 'Meta)
   , tableCachePolicy :: !(Maybe RedisCachePolicy)
+  , tableDescription :: !(Maybe Text)
   }
   deriving (Generic)
 
--- | Construct a 'TableSchema' given a table name and its 'Meta record with no cache policy.
+{- | Construct a 'TableSchema' given a table name and its 'Meta record with no
+cache policy and no description.
+-}
 tableSchema :: Text -> table 'Meta -> TableSchema table
-tableSchema name meta = TableSchema name meta Nothing
+tableSchema name meta = TableSchema name meta Nothing Nothing
 
 -- | Attach a 'RedisCachePolicy' to a 'TableSchema'.
 withRedisCache :: RedisCachePolicy -> TableSchema table -> TableSchema table
 withRedisCache policy s = s {tableCachePolicy = Just policy}
+
+-- | Attach a human-readable description consumed by AI context exporters.
+withTableDescription :: Text -> TableSchema table -> TableSchema table
+withTableDescription desc s = s {tableDescription = Just desc}
 
 -- | Existential wrapper around 'TableSchema' for heterogeneous schema registries.
 data AnyTableSchema where

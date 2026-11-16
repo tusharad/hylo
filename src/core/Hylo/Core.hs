@@ -150,6 +150,7 @@ module Hylo.Core
   , Table (..)
   , RedisCachePolicy (..)
   , withRedisCache
+  , withTableDescription
   , ToFieldValue (..)
   , PatchVal (..)
   , patchEntry
