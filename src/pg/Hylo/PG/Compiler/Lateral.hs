@@ -57,7 +57,7 @@ subquery aggregating results via PostgreSQL's @COALESCE(jsonb_agg(to_jsonb(...))
 -}
 many ::
   forall db a.
-  SupportsLateralSubqueries db =>
+  (SupportsLateralSubqueries db, Projectable a) =>
   Query db a ->
   Query db (NestedList a)
 many childQuery = lateralSubqueriesDict (Proxy :: Proxy db) `seq` Query $ \s ->
@@ -66,7 +66,12 @@ many childQuery = lateralSubqueriesDict (Proxy :: Proxy db) `seq` Query $ \s ->
       targetAlias = case qsRelations childSt of
         [] -> "sub_0"
         (r : _) -> rbAlias r
-      aggExpr = "COALESCE(jsonb_agg(to_jsonb(\"" <> targetAlias <> "\".*)), '[]'::jsonb)"
+      childCols = projectColumns childRes
+      colExprs = case childCols of
+        [] -> ["\"" <> targetAlias <> "\".*"]
+        cs -> cs
+      buildArrayExpr = "jsonb_build_array(" <> T.intercalate ", " colExprs <> ")"
+      aggExpr = "COALESCE(jsonb_agg(" <> buildArrayExpr <> "), '[]'::jsonb)"
       (mChildFrom, childWherePreds) = flattenJoins (qsRelations childSt) (qsPredicates childSt)
       mChildFromWithLaterals = case mChildFrom of
         Nothing -> case qsLaterals childSt of

@@ -43,9 +43,13 @@ import Hylo.Core.Query
   , each
   , insert
   , renderExpr
-  , select
   )
-import Hylo.PG.Connection (Pool (..), pool)
+import Hylo.PG.Codec.Binary
+  ( TableCodec (..)
+  , int64Codec
+  , jsonField
+  )
+import Hylo.PG.Connection (Pool (..), pool, select)
 import Hylo.PG.Pool.Routing
   ( NodeDestination (..)
   , defaultClusterPool
@@ -93,6 +97,10 @@ instance Table AccountT where
 
 instance Projectable (AccountT 'Expr) where
   projectColumns = tableExprColumns
+
+instance TableCodec AccountT where
+  tableCodec = Account <$> field (.id) (idCodec int64Codec) <*> field (.balance) int64Codec
+  tableJsonDecoder = Account <$> jsonField <*> jsonField
 
 accountTable :: TableSchema AccountT
 accountTable =
@@ -276,7 +284,7 @@ spec = describe "Epic 12: Automatic Retry Engine & Commit Hooks" $ do
 
     it "executes read-only query transactions on cluster replicas via runReadOnlyTx" $ do
       let cluster = defaultClusterPool
-          validTx :: Tx Postgres 'ReadOnly (AccountT 'Expr)
+          validTx :: Tx Postgres 'ReadOnly [AccountT 'Result]
           validTx = select (each accountTable)
       res <- runReadOnlyTx cluster validTx
       isRight res `shouldBe` True

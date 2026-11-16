@@ -22,6 +22,7 @@ module Hylo.AI.QueryTool
     -- * Sandboxed AST Compilation & Execution
   , compileAgentQuery
   , executeAgentToolQuery
+  , runAgentToolQueryIO
 
     -- * QuasiQuoter for JSON Payloads
   , json
@@ -62,9 +63,9 @@ import Hylo.AI.Schema.JSON
   , deriveAnthropicToolSchema
   , deriveMCPToolSchema
   )
+import Hylo.Backend.Capability (PGVersion (..), Postgres)
 import Hylo.Core.Context (Ctx (..))
 import Hylo.Core.Expr (QExpr (..), colExpr)
-import Hylo.Core.Query (select)
 import Hylo.Core.Query.Monad
   ( OrderBy (..)
   , OrderDirection (..)
@@ -79,7 +80,9 @@ import Hylo.Core.Query.Monad
   )
 import Hylo.Core.Table (Table (..), TableSchema (..))
 import Hylo.Core.Transaction (Tx, TxError (..), TxMode (..))
-import Hylo.SQL.AST (ScopeId (..), formatScope)
+import Hylo.PG.Codec.Binary (Selectable (..))
+import Hylo.PG.Connection (Pool, select, selectRows)
+import Hylo.SQL.AST (Projectable (..), ScopeId (..), formatScope)
 import Language.Haskell.TH.Quote (QuasiQuoter)
 
 -- | QuasiQuoter for compile-time verified JSON values (re-exported from aeson-qq).
@@ -206,19 +209,40 @@ parseOrderString allowed metaCols scopeAlias str =
                     Desc -> desc colE
                in Right spec
 
--- | Execute an agent tool query inside the effect-pure 'Tx' monad in 'ReadOnly' mode.
+{- | Execute an agent tool query inside the effect-pure 'Tx' monad in 'ReadOnly' mode,
+hydrating decoded rows into a list of table results.
+-}
 executeAgentToolQuery ::
-  (Table table) =>
+  forall table v.
+  (Table table, Projectable (table 'Expr), Selectable (table 'Expr) (table 'Result)) =>
   TableSchema table ->
   AgentPolicy table ->
   Aeson.Value ->
-  Tx db 'ReadOnly (Either QueryToolError (table 'Expr))
+  Tx (Postgres v) 'ReadOnly (Either QueryToolError [table 'Result])
 executeAgentToolQuery schema policy payload =
   case compileAgentQuery schema policy payload of
     Left err -> pure (Left err)
     Right q -> do
       res <- select q
       pure (Right res)
+
+-- | Execute an agent tool query against a live PostgreSQL pool and return hydrated domain rows.
+runAgentToolQueryIO ::
+  forall table.
+  (Table table, Projectable (table 'Expr), Selectable (table 'Expr) (table 'Result)) =>
+  Pool ->
+  TableSchema table ->
+  AgentPolicy table ->
+  Aeson.Value ->
+  IO (Either QueryToolError [table 'Result])
+runAgentToolQueryIO targetPool schema policy payload =
+  case compileAgentQuery schema policy payload of
+    Left err -> pure (Left err)
+    Right (q :: Query (Postgres 'PG17) (table 'Expr)) -> do
+      res <- selectRows targetPool q
+      case res of
+        Left err -> pure (Left (ExecutionError err))
+        Right rows -> pure (Right rows)
 
 -- | Validate that all referenced columns exist in the allowed column whitelist.
 validateWhitelist :: [Text] -> [Text] -> Either QueryToolError ()

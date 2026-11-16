@@ -583,9 +583,32 @@ buildQueryParts d rawProjections st = do
         <> lockClause
     )
 
+-- | Format lateral aggregation expression for target dialect (Postgres jsonb_agg, MySQL JSON_ARRAYAGG, SQLite json_group_array).
+formatAggExprForDialect :: Dialect -> Text -> Text
+formatAggExprForDialect PostgresDialect agg = agg
+formatAggExprForDialect MySQLDialect agg
+  | "jsonb_build_array(" `T.isInfixOf` agg =
+      let inner = extractBuildArrayArgs agg
+       in "COALESCE(JSON_ARRAYAGG(JSON_ARRAY(" <> inner <> ")), JSON_ARRAY())"
+  | otherwise = agg
+formatAggExprForDialect SQLiteDialect agg
+  | "jsonb_build_array(" `T.isInfixOf` agg =
+      let inner = extractBuildArrayArgs agg
+       in "COALESCE(json_group_array(json_array(" <> inner <> ")), '[]')"
+  | otherwise = agg
+
+-- | Extract column arguments inside @jsonb_build_array(...)@.
+extractBuildArrayArgs :: Text -> Text
+extractBuildArrayArgs t =
+  let (_, after) = T.breakOn "jsonb_build_array(" t
+      rest = T.drop (T.length "jsonb_build_array(") after
+      (args, _) = T.breakOn ")" rest
+   in args
+
 -- | Build a correlated LATERAL subquery inside SqlBuilderM, sharing parameters and scopes.
 buildLateralSubquery :: Dialect -> Text -> QueryState -> SqlBuilderM Builder
-buildLateralSubquery d aggExpr childSt = do
+buildLateralSubquery d rawAggExpr childSt = do
+  let aggExpr = formatAggExprForDialect d rawAggExpr
   builderSt <- get
   let childRelAliases = [rbAlias r | r <- qsRelations childSt]
       childAliasMap = foldr (\a m -> Map.insert a a m) (sbsAliasMap builderSt) childRelAliases

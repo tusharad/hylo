@@ -66,6 +66,9 @@ instance Table EmployeeT where
     , renderExpr expr.age
     ]
 
+instance Projectable (EmployeeT 'Expr) where
+  projectColumns = tableExprColumns
+
 employeeTable :: TableSchema EmployeeT
 employeeTable =
   tableSchema "employees" $

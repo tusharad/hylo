@@ -39,9 +39,14 @@ import Hylo.Core.Query
   , each
   , insert
   , renderExpr
-  , select
   )
-import Hylo.PG.Connection (pool, runTx)
+import Hylo.PG.Codec.Binary
+  ( TableCodec (..)
+  , int64Codec
+  , jsonField
+  , textCodec
+  )
+import Hylo.PG.Connection (pool, runTx, select)
 import Hylo.PG.Transaction.Savepoint
   ( allocateSavepoint
   , renderReleaseSavepoint
@@ -84,6 +89,10 @@ instance Table UserT where
 
 instance Projectable (UserT 'Expr) where
   projectColumns = tableExprColumns
+
+instance TableCodec UserT where
+  tableCodec = User <$> field (.id) (idCodec int64Codec) <*> field (.email) textCodec
+  tableJsonDecoder = User <$> jsonField <*> jsonField
 
 userTable :: TableSchema UserT
 userTable =
@@ -152,7 +161,7 @@ spec = describe "Epic 11: Lexically Isolated Tx Monad & Savepoints" $ do
         )
 
     it "Law 2: Compile-Time Read-Only Immutability (Permit select in ReadOnly)" $ do
-      let validReadOnlyTx :: Tx Postgres 'ReadOnly (UserT 'Expr)
+      let validReadOnlyTx :: Tx Postgres 'ReadOnly [UserT 'Result]
           validReadOnlyTx = select (each userTable)
       res <- runTx pool ReadOnly validReadOnlyTx
       res `shouldSatisfy` isRight

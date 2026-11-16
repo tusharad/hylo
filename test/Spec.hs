@@ -30,6 +30,7 @@ import qualified Hylo.PG.Mutation.UpsertSpec as UpsertSpec
 import qualified Hylo.PG.RangeSpec as RangeSpec
 import qualified Hylo.PG.RealPostgresSpec as RealPostgresSpec
 import qualified Hylo.PG.Search.HybridSpec as HybridSpec
+import qualified Hylo.PG.SelectableSpec as SelectableSpec
 import qualified Hylo.PG.Streaming.CursorSpec as CursorSpec
 import qualified Hylo.PG.Transaction.RetrySpec as RetrySpec
 import qualified Hylo.PG.VectorSpec as VectorSpec
@@ -64,4 +65,5 @@ main = hspec $ do
   CapabilitySpec.spec
   BuilderSpec.spec
   ConnectionSpec.spec
+  SelectableSpec.spec
   RealPostgresSpec.spec
