@@ -212,6 +212,7 @@ library
       Hylo.Migrate.CodeGen
       Hylo.Migrate.Diff
       Hylo.Migrate.Linter
+      Hylo.Migrate.Runner.Apply
       Hylo.Migrate.Runner.Live
       Hylo.Migrate.Runner.Shadow
   build-depends:
@@ -221,6 +222,7 @@ library
     , bytestring >=0.10 && <0.13
     , containers >=0.6 && <0.8
     , deepseq >=1.4 && <2
+    , direct-sqlite >=2.3 && <3
     , directory >=1.3 && <2
     , filepath >=1.4 && <2
     , hasql >=1.6 && <1.10
@@ -253,6 +255,7 @@ executable hylo-exe
     , hylo:hylo-core
     , hylo:hylo-pg
     , text >=1.2 && <3
+    , time >=1.9 && <2
 
 test-suite hylo-test
   import: common-options
@@ -271,6 +274,7 @@ test-suite hylo-test
       Hylo.Migrate.DiffSpec
       Hylo.Migrate.LinterSpec
       Hylo.Migrate.LiveRunnerSpec
+      Hylo.Migrate.Runner.ApplySpec
       Hylo.PG.AlgebraSpec
       Hylo.PG.Cache.RedisSpec
       Hylo.PG.Compiler.AggregateSpec

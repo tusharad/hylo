@@ -95,6 +95,8 @@ data MigrationError
   = MigrationIntrospectError !TxError
   | MigrationShadowError !ShadowVerificationResult
   | MigrationLintError ![LintError]
+  | MigrationExecutionError !Text
+  | MigrationHistoryError !Text
   deriving (Eq, Show, Generic)
 
 instance NFData MigrationError where
@@ -102,6 +104,8 @@ instance NFData MigrationError where
     MigrationIntrospectError e -> e `seq` ()
     MigrationShadowError r -> rnf r
     MigrationLintError l -> rnf l
+    MigrationExecutionError t -> rnf t
+    MigrationHistoryError t -> rnf t
 
 instance Exception MigrationError
 
