@@ -41,7 +41,7 @@ jobs:
 
   build-and-test:
     needs: [format, hlint]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
@@ -75,7 +75,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install PostgreSQL client libraries
-        run: sudo apt-get update && sudo apt-get install -y libpq-dev
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev build-essential
 
       - name: Install dependencies, build, and run test suite
         uses: freckle/stack-action@v5
