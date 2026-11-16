@@ -26,6 +26,12 @@ module Hylo.Migrate.Linter
     -- * Two-Phase Constraint Safety (Law 2)
   , splitTwoPhaseConstraint
   , renderTwoPhaseConstraint
+
+    -- * Statement & Preamble Utilities
+  , attachLockTimeoutPreamble
+  , splitStatements
+  , isSetStmt
+  , isIndexCreationStmt
   ) where
 
 import Control.DeepSeq (NFData)
@@ -316,12 +322,20 @@ lintSingleStatement cfg = \case
 Splits a constraint addition into safe 2-step statements:
 Step 1: ADD CONSTRAINT ... NOT VALID (acquires short lock, zero table scan).
 Step 2: VALIDATE CONSTRAINT ... (background validation scan without write lock).
+Primary keys and unique constraints are emitted in a single statement without NOT VALID.
 -}
 splitTwoPhaseConstraint :: TableName -> ConstraintDef -> [DDLStatement]
 splitTwoPhaseConstraint tbl con =
-  [ AddConstraintStmt tbl con True
-  , ValidateConstraintStmt tbl (constraintDefName con)
-  ]
+  case con of
+    ForeignKeyConstraint {} ->
+      [ AddConstraintStmt tbl con True
+      , ValidateConstraintStmt tbl (constraintDefName con)
+      ]
+    CheckConstraint {} ->
+      [ AddConstraintStmt tbl con True
+      , ValidateConstraintStmt tbl (constraintDefName con)
+      ]
+    _ -> [AddConstraintStmt tbl con False]
 
 -- | Render 2-phase constraint addition into two standalone SQL statements.
 renderTwoPhaseConstraint :: (IsString s) => TableName -> ConstraintDef -> (s, s)
@@ -332,6 +346,19 @@ renderTwoPhaseConstraint tbl con =
       , fromString (T.unpack (renderDDLStatement step2))
       )
     _ -> ("", "")
+
+{- | Prepend a 'lock_timeout' preamble if table-altering statements are present
+and an explicit lock_timeout is not already specified.
+-}
+attachLockTimeoutPreamble :: Text -> Text
+attachLockTimeoutPreamble sql
+  | T.null (T.strip sql) = sql
+  | "LOCK_TIMEOUT" `T.isInfixOf` T.toUpper sql = sql
+  | isOnlyIndexStmts = sql
+  | otherwise = "SET LOCAL lock_timeout = '2s';\n\n" <> sql
+  where
+    stmts = splitStatements sql
+    isOnlyIndexStmts = all isIndexCreationStmt (filter (not . isSetStmt) stmts)
 
 -- | Extract constraint name from ConstraintDef.
 constraintDefName :: ConstraintDef -> ConstraintName

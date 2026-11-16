@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
@@ -20,6 +21,7 @@ module Hylo.Core.Table
   ( -- * Table Schema & Typeclass
     TableSchema (..)
   , tableSchema
+  , AnyTableSchema (..)
   , Table (..)
   , RedisCachePolicy (..)
   , withRedisCache
@@ -164,6 +166,15 @@ tableSchema name meta = TableSchema name meta Nothing
 -- | Attach a 'RedisCachePolicy' to a 'TableSchema'.
 withRedisCache :: RedisCachePolicy -> TableSchema table -> TableSchema table
 withRedisCache policy s = s {tableCachePolicy = Just policy}
+
+-- | Existential wrapper around 'TableSchema' for heterogeneous schema registries.
+data AnyTableSchema where
+  AnyTableSchema :: (Table table) => TableSchema table -> AnyTableSchema
+
+instance Show AnyTableSchema where
+  showsPrec d (AnyTableSchema s) =
+    showParen (d > 10) $
+      showString "AnyTableSchema " . shows (tableName s)
 
 -- | Construct a standard non-nullable column descriptor.
 column :: Text -> LogicalType a -> ColDef a

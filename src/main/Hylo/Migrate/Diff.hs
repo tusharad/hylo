@@ -36,6 +36,7 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Hylo.Migrate.AST
 import Hylo.Migrate.Catalog
+import Hylo.Migrate.Linter (splitTwoPhaseConstraint)
 
 -- | Structural differences between an existing table and a target table.
 data TableDiff = TableDiff
@@ -292,7 +293,7 @@ tableDiffToUpStmts td =
           )
           (tdModifiedColumns td)
       dropCons = map (\c -> DropConstraintStmt tName (constraintName c) True) (tdDroppedConstraints td)
-      addCons = map (\c -> AddConstraintStmt tName c False) (tdAddedConstraints td)
+      addCons = concatMap (splitTwoPhaseConstraint tName) (tdAddedConstraints td)
       dropIdxs = map (\i -> DropIndexStmt (idxName i) False True) (tdDroppedIndexes td)
       addIdxs = map CreateIndexStmt (tdAddedIndexes td)
    in addCols ++ dropCols ++ modCols ++ dropCons ++ addCons ++ dropIdxs ++ addIdxs
@@ -321,7 +322,7 @@ tableDiffToDownStmts td =
           )
           (tdModifiedColumns td)
       revAddCons = map (\c -> DropConstraintStmt tName (constraintName c) True) (tdAddedConstraints td)
-      revDropCons = map (\c -> AddConstraintStmt tName c False) (tdDroppedConstraints td)
+      revDropCons = concatMap (splitTwoPhaseConstraint tName) (tdDroppedConstraints td)
       revAddIdxs = map (\i -> DropIndexStmt (idxName i) False True) (tdAddedIndexes td)
       revDropIdxs = map CreateIndexStmt (tdDroppedIndexes td)
    in revAddIdxs ++ revAddCons ++ revAddCols ++ revModCols ++ revDropCols ++ revDropCons ++ revDropIdxs

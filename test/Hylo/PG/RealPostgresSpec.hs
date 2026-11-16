@@ -25,6 +25,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as BSL
 import Data.Int (Int64)
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.Map.Strict as Map
 import Data.Ratio ((%))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -84,6 +85,9 @@ import Hylo.Core.Transaction
   , withSavepoint
   )
 import Hylo.Core.TypeError (TxMode (..))
+import Hylo.Migrate.AST (TableDef (..))
+import Hylo.Migrate.Catalog (Catalog (..))
+import Hylo.Migrate.Runner.Live (introspectLiveDatabase)
 import Hylo.PG.Cache.Redis (selectManyCachedByIds)
 import Hylo.PG.Codec.Binary
   ( boolCodec
@@ -951,6 +955,30 @@ spec = describe "Real PostgreSQL Integration Suite (Docker / Testcontainer)" $ d
                     | i <- [1 .. 100]
                     ]
               rows `shouldBe` expected
+
+  it
+    "User Story 2 Acceptance Criterion: executes introspectLiveDatabase against real PostgreSQL"
+    $ withTestPostgres
+    $ \p -> do
+      case poolActiveConnection p of
+        Nothing -> pendingWith "Docker / PostgreSQL not available in environment"
+        Just _ -> do
+          _ <-
+            executeSql
+              p
+              "DROP TABLE IF EXISTS test_live_catalog_posts CASCADE; \
+              \CREATE TABLE test_live_catalog_posts ( \
+              \  id BIGINT PRIMARY KEY, \
+              \  title TEXT NOT NULL, \
+              \  published BOOLEAN NOT NULL DEFAULT false \
+              \);"
+          resCat <- introspectLiveDatabase p
+          case resCat of
+            Left err -> expectationFailure ("Failed to introspect live PostgreSQL: " ++ show err)
+            Right cat -> do
+              Map.member "test_live_catalog_posts" (catalogTables cat) `shouldBe` True
+              let tbl = catalogTables cat Map.! "test_live_catalog_posts"
+              length (tblColumns tbl) `shouldBe` 3
 
 -- -----------------------------------------------------------------------------
 -- User Story 12 Test Row Type & Codec

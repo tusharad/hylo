@@ -146,6 +146,7 @@ module Hylo.Core
     -- * Schema & Table Definitions
   , TableSchema (..)
   , tableSchema
+  , AnyTableSchema (..)
   , Table (..)
   , RedisCachePolicy (..)
   , withRedisCache

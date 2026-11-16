@@ -9,8 +9,10 @@ module Hylo
   ( module Hylo.Core
   , module Hylo.Redis
   , module Hylo.SQLite
+  , module Hylo.Migrate.Runner.Live
   ) where
 
 import Hylo.Core
+import Hylo.Migrate.Runner.Live
 import Hylo.Redis
 import Hylo.SQLite

@@ -16,6 +16,7 @@ import qualified Hylo.Core.TransactionSpec as TransactionSpec
 import qualified Hylo.Core.TypeErrorSpec as TypeErrorSpec
 import qualified Hylo.Migrate.DiffSpec as DiffSpec
 import qualified Hylo.Migrate.LinterSpec as LinterSpec
+import qualified Hylo.Migrate.LiveRunnerSpec as LiveRunnerSpec
 import qualified Hylo.PG.AlgebraSpec as AlgebraSpec
 import qualified Hylo.PG.Cache.RedisSpec as RedisCacheSpec
 import qualified Hylo.PG.Compiler.AggregateSpec as AggregateSpec
@@ -64,6 +65,7 @@ main = hspec $ do
   QueryToolSpec.spec
   DiffSpec.spec
   LinterSpec.spec
+  LiveRunnerSpec.spec
   CapabilitySpec.spec
   BuilderSpec.spec
   ConnectionSpec.spec

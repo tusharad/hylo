@@ -25,8 +25,11 @@ module Hylo.Migrate.Catalog
   , listTables
 
     -- * Bridge from TableSchema to Catalog (User Story 11)
+  , AnyTableSchema (..)
   , tableSchemaToDef
+  , anyTableSchemaToDef
   , schemasToCatalog
+  , anySchemasToCatalog
 
     -- * Sample Catalog Definitions (Test Oracles)
   , sampleDocumentCatalogDef
@@ -46,7 +49,7 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 import GHC.TypeLits (natVal)
 import Hylo.Core.Context (ColDef (..), LogicalType (..))
-import Hylo.Core.Table (Table (..), TableSchema (..))
+import Hylo.Core.Table (AnyTableSchema (..), Table (..), TableSchema (..))
 import Hylo.Migrate.AST
 import Text.Read (readMaybe)
 
@@ -100,6 +103,14 @@ tableSchemaToDef schema =
         , tblConstraints = pkConstraints
         , tblComment = Nothing
         }
+
+-- | Bridge an existential 'AnyTableSchema' to a migration 'TableDef'.
+anyTableSchemaToDef :: AnyTableSchema -> TableDef
+anyTableSchemaToDef (AnyTableSchema s) = tableSchemaToDef s
+
+-- | Construct a 'Catalog' from a list of 'AnyTableSchema' registries.
+anySchemasToCatalog :: [AnyTableSchema] -> Catalog
+anySchemasToCatalog schemas = schemasToCatalog (map anyTableSchemaToDef schemas)
 
 -- | Construct a 'Catalog' from a list of 'TableDef' definitions.
 schemasToCatalog :: [TableDef] -> Catalog
