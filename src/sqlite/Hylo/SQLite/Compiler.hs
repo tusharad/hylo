@@ -11,6 +11,8 @@ module Hylo.SQLite.Compiler
   , renderSQLiteSQL
   , renderSQLiteSQLText
   , previewSQLiteSQL
+  , many
+  , NestedList (..)
   ) where
 
 import Data.Sequence (Seq)
@@ -25,6 +27,7 @@ import Hylo.SQL.Builder
   , compileQuery
   , previewQuery
   )
+import Hylo.SQL.Compiler.Lateral (NestedList (..), many)
 
 -- | Compile a SQLite query into a CompiledQuery with bound parameters.
 compileSQLiteQuery :: Projectable a => Query SQLite a -> CompiledQuery
